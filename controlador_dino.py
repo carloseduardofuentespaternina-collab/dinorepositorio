@@ -63,7 +63,7 @@ try:
             driver.execute_script("Runner.instance_.gameOver()")
             break
             
-        time.sleep(0.05)
+        time.sleep(0.1)
 
 
     assert score >= 500, f"Error: El juego terminó antes de tiempo con {score} puntos."
