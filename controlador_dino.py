@@ -12,6 +12,9 @@ import time
 chrome_options = Options()
 
 # Ocultamos las banderas de automatización para evitar bloqueos en la web
+chrome_options = Options()
+
+# Evita que algunas páginas detecten Selenium
 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
 chrome_options.add_experimental_option(
     "excludeSwitches",
@@ -22,11 +25,23 @@ chrome_options.add_experimental_option(
     False
 )
 
-# ¡ELIMINAMOS EL MODO HEADLESS!
-# Ya no usamos "if os.getenv('TF_BUILD'):" para que siempre abra la ventana visual
+# Configuración específica para Azure DevOps
+if os.getenv("TF_BUILD"):
+
+    # Ejecutar sin interfaz gráfica
+    chrome_options.add_argument("--headless=new")
+
+    # Evitar problemas de permisos en Linux/containers
+    chrome_options.add_argument("--no-sandbox")
+
+    # Evitar fallos por memoria compartida insuficiente
+    chrome_options.add_argument("--disable-dev-shm-usage")
+
+    # Opcionales pero recomendados para renderizado
+    chrome_options.add_argument("--window-size=1920,1080")
 
 driver = webdriver.Chrome(
-    service=Service(ChromeDriverManager().install()), 
+    service=Service(ChromeDriverManager().install()),
     options=chrome_options
 )
 
