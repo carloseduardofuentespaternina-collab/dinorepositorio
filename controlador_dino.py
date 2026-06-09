@@ -42,7 +42,7 @@ try:
 
     driver.find_element(By.TAG_NAME, "body").send_keys(Keys.SPACE)
     print("Juego iniciado. Controlando...")
-    
+    score=0
    
     while score<2000:
       
