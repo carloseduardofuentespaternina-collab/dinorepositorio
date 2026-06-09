@@ -2,21 +2,16 @@ trigger:
 - main
 
 pool:
-  vmImage: 'windows-latest' # para pruebas UI
+  name: 'pool_de_agentes' # Nombre del pool de Windows donde registraste tu agente interactivo
 
 steps:
-- task: UsePythonVersion@0
-  inputs:
-    versionSpec: '3.x'
-    addToPath: true
-
+# 1. Instalar las dependencias necesarias de Python
 - script: |
-    python -m pip install --upgrade pip
+    pip install selenium
     pip install selenium webdriver-manager
-  displayName: 'Instalar dependencias de Selenium'
+  displayName: 'Instalar Librerías de Python'
 
+# 2. Ejecutar tu archivo específico controlador_dino.py en la pantalla real
 - script: |
     python controlador_dino.py
-  displayName: 'Ejecutar script de Selenium'
-
-    
+  displayName: 'Ejecutar controlador_dino.py en GUI Real'
