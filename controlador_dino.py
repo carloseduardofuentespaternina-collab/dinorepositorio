@@ -42,25 +42,23 @@ try:
     driver.find_element(By.TAG_NAME, "body").send_keys(Keys.SPACE)
     print("Juego iniciado. Controlando...")
     
-    score=0
-    while score<500:
+   
+    while True:
       
         driver.execute_script("""
+            var inst = Runner.instance_;
+            if (inst.horizon.obstacles.length > 0) {
                 var obs = inst.horizon.obstacles[0];
-                
-                // MULTIPLICAMOS la velocidad actual por un factor óptimo (ej. 17 o 18)
-                // A más velocidad, el número límite de xPos será mayor, saltando ANTES.
-                var distanciaMinima = inst.currentSpeed * 17.5; 
-                
-                if (obs.xPos < distanciaMinima && obs.xPos > 0) {
+                if (obs.xPos < 120 && obs.xPos > 0) {
                     inst.tRex.startJump();
                 }
+            }
         """)
         
     
         score = driver.execute_script("return Runner.instance_.distanceRan")
         
-        if score >= 500:
+        if score == 500:
             print(f"Meta alcanzada: {int(score)}. Finalizando prueba.")
       
             driver.execute_script("Runner.instance_.gameOver()")
