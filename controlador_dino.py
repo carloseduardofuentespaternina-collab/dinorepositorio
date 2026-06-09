@@ -44,7 +44,10 @@ try:
     
     score=0*1
     while score!=500:
-      
+        crashed = driver.execute_script("return Runner.instance_ ? Runner.instance_.crashed : false")
+        if crashed:
+            print(f"El dinosaurio chocó. Puntaje final obtenido: {int(score)}.")
+            break
         driver.execute_script("""
             var inst = Runner.instance_;
             if (inst.horizon.obstacles.length > 0) {
@@ -64,7 +67,7 @@ try:
             driver.execute_script("Runner.instance_.gameOver()")
             break
             
-        time.sleep(0.05)
+        time.sleep(0.5)
 
 
     assert score >= 500, f"Error: El juego terminó antes de tiempo con {score} puntos."
