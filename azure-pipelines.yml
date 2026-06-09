@@ -3,7 +3,7 @@ trigger:
 
 pool:
   name: 'pool_de_agentes'
-  name: 'eduardino' # Nombre del pool de Windows donde registraste tu agente interactivo
+# Nombre del pool de Windows donde registraste tu agente interactivo
 
 steps:
 
