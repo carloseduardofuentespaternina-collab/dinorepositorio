@@ -1,12 +1,6 @@
 trigger:
 - main
-- job: Dino
-  strategy:
-    matrix:
-      Ejecucion1:
-        INSTANCE: "1"
-      Ejecucion2:
-        INSTANCE: "2"
+
 pool:
   name: 'pool_de_agentes'
   name: 'eduardino' # Nombre del pool de Windows donde registraste tu agente interactivo
