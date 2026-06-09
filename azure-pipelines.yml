@@ -6,9 +6,7 @@ pool:
 
 steps:
 
-- task: UsePythonVersion@0
-  inputs:
-    versionSpec: '3.14.5'
+
 - checkout: self
   clean: true
   displayName: 'Descargar Código del Repositorio'
