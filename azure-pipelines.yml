@@ -2,14 +2,21 @@ trigger:
 - main
 
 pool:
-  vmImage: 'ubuntu-latest'
+  vmImage: 'windows-latest' # para pruebas UI
 
 steps:
 - task: UsePythonVersion@0
   inputs:
-    versionSpec: '3.11'
+    versionSpec: '3.x'
+    addToPath: true
 
 - script: |
+    python -m pip install --upgrade pip
     pip install selenium webdriver-manager
+  displayName: 'Instalar dependencias de Selenium'
+
+- script: |
     python controlador_dino.py
-  displayName: 'Ejecutar Bot en Azure'
+  displayName: 'Ejecutar script de Selenium'
+
+    
