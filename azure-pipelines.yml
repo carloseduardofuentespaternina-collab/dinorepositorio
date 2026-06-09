@@ -1,8 +1,17 @@
 trigger:
 - main
+jobs:
+- job: EjecutarEnPools
+  strategy:
+    matrix:
+      PoolDeAgentes:
+        agentPool: pool_de_agentes
+      Eduardino:
+        agentPool: eduardino
 
-pool:
-  name: 'pool_de_agentes'
+  pool:
+    name: $(agentPool)
+
 # Nombre del pool de Windows donde registraste tu agente interactivo
 
 steps:
