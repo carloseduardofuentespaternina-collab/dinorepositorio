@@ -47,13 +47,35 @@ try:
     while True:
       
         driver.execute_script("""
-            var inst = Runner.instance_;
-            if (inst.horizon.obstacles.length > 0) {
-                var obs = inst.horizon.obstacles[0];
-                if (obs.xPos < 120 && obs.xPos > 0) {
-                    inst.tRex.startJump();
+            const juego = Runner.instance_;
+            if (!juego) return;
+
+            // Guardamos la función original de actualización
+            const originalUpdate = juego.update;
+
+            // Sobrescribimos el ciclo de renderizado
+            juego.update = function() {
+                // Ejecutamos primero la lógica normal del juego
+                originalUpdate.apply(this, arguments);
+                
+                // Si hay obstáculos en pantalla y el tRex NO está saltando actualmente
+                if (this.horizon.obstacles.length > 0 && !this.tRex.jumping) {
+                    
+                    // Tomamos el primer obstáculo de la fila de forma correcta
+                    const obstaculo = this.horizon.obstacles[0];
+                    
+                    // Condición de distancia óptima basada en la velocidad actual del juego
+                    const distanciaSalto = 25 * this.currentSpeed; 
+                    
+                    if (obstaculo.xPos < distanciaSalto && obstaculo.xPos > 0) {
+                        // Forzamos el salto nativo simulando el evento del juego
+                        // Esto evita alterar el estado gráfico y mantiene al dinosaurio visible
+                        juego.onKeyDown({keyCode: 32, type: "keydown"});
+                    }
                 }
-            }
+            };
+        }
+        activarAutopiloto();
         """)
         
     
