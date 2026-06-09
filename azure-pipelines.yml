@@ -25,6 +25,10 @@ jobs:
       pip install webdriver-manager
     displayName: 'Instalar Librerías de Python'
 
+
+
   - script: |
       python controlador_dino.py
     displayName: 'Ejecutar controlador_dino.py en GUI Real'
+
+
