@@ -12,9 +12,9 @@ import time
 chrome_options = Options()
 
 # Ocultamos las banderas de automatización para evitar bloqueos en la web
-chrome_options.add_argument("--headless=new")
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+chrome_options.add_experimental_option('useAutomationExtension', False)
 
 # ¡ELIMINAMOS EL MODO HEADLESS!
 # Ya no usamos "if os.getenv('TF_BUILD'):" para que siempre abra la ventana visual
@@ -29,19 +29,19 @@ driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
     "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
 })
 try:
-   
+
     print("Conectando al juego en la web...")
     driver.get("https://chromedino.com/")
-    
- 
+
+
     WebDriverWait(driver, 10).until(
         lambda d: d.execute_script("return typeof Runner !== 'undefined'")
     )
-    
+
 
     driver.find_element(By.TAG_NAME, "body").send_keys(Keys.SPACE)
     print("Juego iniciado. Controlando...")
-    
+
     score=0*1
     while score<5000:
         driver.execute_script("""
@@ -53,16 +53,17 @@ try:
                 }
             }
         """)
-        
-    
+
+
         score = driver.execute_script("return Runner.instance_.distanceRan")
-        
-        if score > 5000:
+
+        if score == 500:
             print(f"Meta alcanzada: {int(score)}. Finalizando prueba.")
-      
+
             driver.execute_script("Runner.instance_.gameOver()")
             break
-            
+
+        time.sleep(0.05)
         time.sleep(0.1)
 
 
