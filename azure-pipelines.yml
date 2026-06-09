@@ -1,30 +1,30 @@
 trigger:
 - main
 
+parameters:
+- name: agentPool
+  displayName: 'Pool de agentes'
+  type: string
+  default: pool_de_agentes
+  values:
+  - pool_de_agentes
+  - eduardino
+
 jobs:
 - job: EjecutarControladorDino
-  strategy:
-    matrix:
-      PoolDeAgentes:
-        agentPool: pool_de_agentes
-      Eduardino:
-        agentPool: eduardino
-
   pool:
-    name: $(agentPool)
+    name: ${{ parameters.agentPool }}
 
   steps:
   - checkout: self
     clean: true
     displayName: 'Descargar Código del Repositorio'
 
-  # Instalar dependencias
   - script: |
       pip install selenium
       pip install webdriver-manager
     displayName: 'Instalar Librerías de Python'
 
-  # Ejecutar script
   - script: |
       python controlador_dino.py
     displayName: 'Ejecutar controlador_dino.py en GUI Real'
