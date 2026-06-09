@@ -12,9 +12,10 @@ import time
 chrome_options = Options()
 
 # Ocultamos las banderas de automatización para evitar bloqueos en la web
-chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-chrome_options.add_experimental_option('useAutomationExtension', False)
+if os.getenv('TF_BUILD'):
+    chrome_options.add_argument("--headless=new")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
 
 # ¡ELIMINAMOS EL MODO HEADLESS!
 # Ya no usamos "if os.getenv('TF_BUILD'):" para que siempre abra la ventana visual
@@ -57,7 +58,7 @@ try:
     
         score = driver.execute_script("return Runner.instance_.distanceRan")
         
-        if score == 500:
+        if score > 5000:
             print(f"Meta alcanzada: {int(score)}. Finalizando prueba.")
       
             driver.execute_script("Runner.instance_.gameOver()")
