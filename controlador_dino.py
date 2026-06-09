@@ -57,7 +57,7 @@ try:
 
         score = driver.execute_script("return Runner.instance_.distanceRan")
 
-        if score == 500:
+        if score >= 5000:
             print(f"Meta alcanzada: {int(score)}. Finalizando prueba.")
 
             driver.execute_script("Runner.instance_.gameOver()")
