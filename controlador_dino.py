@@ -112,7 +112,7 @@ try:
         f"con {score} puntos."
     )
 
-    print("Prueba finalizada con éxito.")
+    print("Prueba finalizada con éxito")
 
 except Exception as e:
     print(f"Error en la ejecución: {e}")
