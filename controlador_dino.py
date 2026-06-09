@@ -28,73 +28,70 @@ driver = webdriver.Chrome(
 driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
     "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
 })
-
 try:
-   
     print("Conectando al juego en la web...")
-    driver.get("https://chromedino.com/")
+    driver.get("https://chromedino.com")
+    driver.maximize_window()
     
- 
-    WebDriverWait(driver, 10).until(
+    # 1. Esperar a que el juego cargue
+    WebDriverWait(driver, 30).until(
         lambda d: d.execute_script("return typeof Runner !== 'undefined'")
     )
     
+    # 2. Iniciar el juego
+    body = driver.find_element(By.TAG_NAME, "body")
+    body.send_keys(Keys.SPACE)
+    print("Juego iniciado. Controlando por simulación de hardware nativo...")
+    time.sleep(1)
 
-    driver.find_element(By.TAG_NAME, "body").send_keys(Keys.SPACE)
-    print("Juego iniciado. Controlando...")
-    score=0
-   
-    while score<2000:
-      
-        driver.execute_script("""
-            const juego = Runner.instance_;
-            if (!juego) return;
+    timeout_seguridad = time.time() + 90
+    score = 0
 
-            // Guardamos la función original de actualización
-            const originalUpdate = juego.update;
-
-            // Sobrescribimos el ciclo de renderizado
-            juego.update = function() {
-                // Ejecutamos primero la lógica normal del juego
-                originalUpdate.apply(this, arguments);
-                
-                // Si hay obstáculos en pantalla y el tRex NO está saltando actualmente
-                if (this.horizon.obstacles.length > 0 && !this.tRex.jumping) {
-                    
-                    // Tomamos el primer obstáculo de la fila de forma correcta
-                    const obstaculo = this.horizon.obstacles[0];
-                    
-                    // Condición de distancia óptima basada en la velocidad actual del juego
-                    const distanciaSalto = 25 * this.currentSpeed; 
-                    
-                    if (obstaculo.xPos < distanciaSalto && obstaculo.xPos > 0) {
-                        // Forzamos el salto nativo simulando el evento del juego
-                        // Esto evita alterar el estado gráfico y mantiene al dinosaurio visible
-                        juego.onKeyDown({keyCode: 32, type: "keydown"});
-                    }
-                }
+    # 3. Bucle de alto rendimiento controlado por Python
+    while score < 500 and time.time() < timeout_seguridad:
+        
+        # Leemos los datos esenciales mediante consultas seguras de solo lectura
+        datos_juego = driver.execute_script("""
+            if (typeof Runner === 'undefined' || !Runner.instance_) return null;
+            return {
+                score: Runner.instance_.distanceRan,
+                hasObstacles: Runner.instance_.horizon.obstacles.length > 0,
+                xPos: Runner.instance_.horizon.obstacles.length > 0 ? Runner.instance_.horizon.obstacles[0].xPos : -1,
+                speed: Runner.instance_.currentSpeed
             };
-        }
-        activarAutopiloto();
         """)
-        
-    
-        score = driver.execute_script("return Runner.instance_.distanceRan")
-        
-        if score >= 2000:
-            print(f"Meta alcanzada: {int(score)}. Finalizando prueba.")
-      
-            driver.execute_script("Runner.instance_.gameOver()")
-            break
+
+        if datos_juego:
+            score = datos_juego['score']
             
-        time.sleep(0.05)
+            # Si hay un obstáculo en pantalla
+            if datos_juego['hasObstacles']:
+                x_pos = datos_juego['xPos']
+                velocidad = datos_juego['speed']
+                
+                # Distancia de salto adaptativa segura
+                distancia_limite = 23 * velocidad
+                
+                # Si el cactus entra en la zona de peligro, enviamos la señal física de salto
+                if 0 < x_pos < distancia_limite:
+                    body.send_keys(Keys.SPACE)
+                    # Pausa estratégica pequeña para evitar enviar múltiples saltos por el mismo cactus
+                    time.sleep(0.18) 
 
+        # Tasa de muestreo óptima para evitar sobrecargar la memoria de Chromedriver
+        time.sleep(0.01)
 
-    assert score >= 500, f"Error: El juego terminó antes de tiempo con {score} puntos."
-    print("Prueba finalizada con éxito en Azure.")
+    print(f"Ciclo terminado. Puntaje final alcanzado: {int(score)}")
+    
+    if score >= 500:
+        print("¡Meta de 500 puntos superada con éxito!")
+        driver.execute_script("if(Runner.instance_) Runner.instance_.gameOver();")
+
+    assert score >= 500, f"Error: El juego se detuvo en {int(score)} puntos."
+    print("Prueba finalizada con éxito total en Azure DevOps.")
 
 except Exception as e:
-    print(f"Error en la ejecución: {e}")
+    print(f"Error detectado en la ejecución: {e}")
     raise
 finally:
     driver.quit()
