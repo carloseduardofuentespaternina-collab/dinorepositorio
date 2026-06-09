@@ -1,7 +1,8 @@
 trigger:
 - main
+
 jobs:
-- job: EjecutarEnPools
+- job: EjecutarControladorDino
   strategy:
     matrix:
       PoolDeAgentes:
@@ -12,21 +13,18 @@ jobs:
   pool:
     name: $(agentPool)
 
-# Nombre del pool de Windows donde registraste tu agente interactivo
+  steps:
+  - checkout: self
+    clean: true
+    displayName: 'Descargar Código del Repositorio'
 
-steps:
+  # Instalar dependencias
+  - script: |
+      pip install selenium
+      pip install webdriver-manager
+    displayName: 'Instalar Librerías de Python'
 
-
-- checkout: self
-  clean: true
-  displayName: 'Descargar Código del Repositorio'
-# 1. Instalar las dependencias necesarias de Python
-- script: |
-    pip install selenium
-    pip install selenium webdriver-manager
-  displayName: 'Instalar Librerías de Python'
-
-# 2. Ejecutar tu archivo específico controlador_dino.py en la pantalla real
-- script: |
-    python controlador_dino.py
-  displayName: 'Ejecutar controlador_dino.py en GUI Real'
+  # Ejecutar script
+  - script: |
+      python controlador_dino.py
+    displayName: 'Ejecutar controlador_dino.py en GUI Real'
