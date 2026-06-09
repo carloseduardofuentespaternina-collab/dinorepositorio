@@ -43,7 +43,7 @@ try:
     print("Juego iniciado. Controlando...")
     
     score=0*1
-    while score<500:
+    while score<5000:
         crashed = driver.execute_script("return Runner.instance_ ? Runner.instance_.crashed : false")
         driver.execute_script("""
             var inst = Runner.instance_;
