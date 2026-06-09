@@ -46,13 +46,15 @@ try:
     while score<500:
       
         driver.execute_script("""
-            var inst = Runner.instance_;
-            if (inst.horizon.obstacles.length > 0) {
                 var obs = inst.horizon.obstacles[0];
-                if (obs.xPos < 120 && obs.xPos > 0) {
+                
+                // MULTIPLICAMOS la velocidad actual por un factor óptimo (ej. 17 o 18)
+                // A más velocidad, el número límite de xPos será mayor, saltando ANTES.
+                var distanciaMinima = inst.currentSpeed * 17.5; 
+                
+                if (obs.xPos < distanciaMinima && obs.xPos > 0) {
                     inst.tRex.startJump();
                 }
-            }
         """)
         
     
