@@ -44,7 +44,7 @@ try:
     print("Juego iniciado. Controlando...")
     
    
-    while True:
+    while score<2000:
       
         driver.execute_script("""
             const juego = Runner.instance_;
