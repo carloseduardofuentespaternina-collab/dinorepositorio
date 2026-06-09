@@ -27,7 +27,7 @@ try:
     driver.get("https://chromedino.com/")
     
  
-    WebDriverWait(driver, 10).until(
+    WebDriverWait(driver, 30).until(
         lambda d: d.execute_script("return typeof Runner !== 'undefined'")
     )
     
