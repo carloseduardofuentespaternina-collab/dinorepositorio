@@ -42,8 +42,8 @@ try:
     driver.find_element(By.TAG_NAME, "body").send_keys(Keys.SPACE)
     print("Juego iniciado. Controlando...")
     
-   
-    while True:
+    score=0*1
+    while score!=500:
       
         driver.execute_script("""
             var inst = Runner.instance_;
