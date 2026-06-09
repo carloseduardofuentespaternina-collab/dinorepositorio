@@ -12,10 +12,9 @@ import time
 chrome_options = Options()
 
 # Ocultamos las banderas de automatización para evitar bloqueos en la web
-if os.getenv('TF_BUILD'):
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--headless=new")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
 
 # ¡ELIMINAMOS EL MODO HEADLESS!
 # Ya no usamos "if os.getenv('TF_BUILD'):" para que siempre abra la ventana visual
