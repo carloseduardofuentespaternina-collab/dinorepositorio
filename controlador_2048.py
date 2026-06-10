@@ -21,10 +21,10 @@ def get_local_game_html():
         return None
 
 # =========================
-# CONFIGURACIÓN CHROME (AZURE)
+# CONFIGURACIÓN CHROME (AZURE / LOCAL)
 # =========================
 chrome_options = Options()
-chrome_options.add_argument("--headless")        # Comenta para ver ventana
+chrome_options.add_argument("--headless")        # Comenta esta línea si quieres ver la ventana del navegador
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
@@ -82,7 +82,7 @@ def restart_game(driver):
     print("🔄 Juego reiniciado")
 
 # =========================
-# BUCLE PRINCIPAL CON ESTRATEGIA DE ESQUINA
+# BUCLE PRINCIPAL OPTIMIZADO
 # =========================
 def main():
     html = get_local_game_html()
@@ -100,78 +100,78 @@ def main():
     last_max_tile = 0
     last_progress_time = time.time()
     
+    # Estrategia estricta de esquina: Prioridad Izquierda -> Abajo -> Derecha -> Arriba
+    moves_order = ["LEFT", "DOWN", "RIGHT", "UP"]
+    
     while True:
         try:
             board = get_board(driver)
             if not board or all(v == 0 for row in board for v in row):
-                time.sleep(0.2)
+                time.sleep(0.1)
                 continue
             
-            # Detectar Game Over
+            # 1. Detectar Game Over real en la pantalla
             if driver.find_elements(By.CLASS_NAME, "game-over") and driver.find_element(By.CLASS_NAME, "game-over").is_displayed():
-                print("💀 Game Over. Reiniciando...")
+                print("💀 Game Over oficial detectado. Reiniciando partida...")
                 restart_game(driver)
                 last_board = None
                 consecutive_no_change = 0
                 last_progress_time = time.time()
                 continue
             
-            # Control de progreso: si la ficha máxima no aumenta en 20 segundos, reiniciar
+            # 2. Control de progreso (Subido a 40s porque en niveles altos toma tiempo subir la ficha máxima)
             current_max = max(max(row) for row in board)
             if current_max > last_max_tile:
                 last_max_tile = current_max
                 last_progress_time = time.time()
-            elif time.time() - last_progress_time > 20:
-                print("⏱️ Sin progreso en 20 segundos. Reiniciando...")
+            elif time.time() - last_progress_time > 40:
+                print("⏱️ Sin progreso en la ficha máxima durante 40 segundos. Reiniciando...")
                 restart_game(driver)
                 last_max_tile = 0
                 last_progress_time = time.time()
                 last_board = None
                 continue
             
-            # Si el tablero no cambió después de 3 movimientos, reiniciar (evita bloqueo)
-            if last_board is not None and board == last_board:
-                consecutive_no_change += 1
-                if consecutive_no_change >= 3:
-                    print("⚠️ Tablero congelado. Reiniciando...")
-                    restart_game(driver)
-                    consecutive_no_change = 0
-                    last_board = None
-                    continue
-            else:
-                consecutive_no_change = 0
-            
-            # ESTRATEGIA GANADORA: priorizar IZQUIERDA, luego ABAJO, luego DERECHA, luego ARRIBA
-            # Esta secuencia compacta las fichas hacia la esquina inferior izquierda.
-            moves_order = ["LEFT", "DOWN", "RIGHT", "UP"]
+            # 3. Intentar movimientos en orden de prioridad
             move_executed = False
-            
             for move in moves_order:
                 send_key(driver, move)
-                # Esperar hasta 0.3 segundos a que el tablero cambie
-                start_wait = time.time()
-                while time.time() - start_wait < 0.3:
-                    new_board = get_board(driver)
-                    if new_board != board:
-                        move_executed = True
-                        last_board = new_board
-                        break
-                    time.sleep(0.03)
-                if move_executed:
-                    break
+                
+                # Tiempo prudente para que termine la animación del movimiento en el navegador
+                time.sleep(0.12) 
+                
+                new_board = get_board(driver)
+                if new_board != board:
+                    last_board = new_board
+                    move_executed = True
+                    consecutive_no_change = 0  # Reseteamos contador ya que el tablero sí cambió
+                    break  # Rompe el 'for' para iniciar el siguiente ciclo del 'while' con el nuevo tablero
             
+            # 4. Gestión en caso de que los movimientos prioritarios fallen (Tablero atascado)
             if not move_executed:
-                # Esto no debería ocurrir, pero por si acaso reiniciamos
-                print("❌ Ningún movimiento cambió el tablero. Reiniciando...")
-                restart_game(driver)
-                last_board = None
+                consecutive_no_change += 1
+                print(f"⚠️ Tablero estático. Intento de desatasco ({consecutive_no_change}/5)")
+                
+                if consecutive_no_change >= 5:
+                    print("❌ El tablero está completamente bloqueado. Forzando reinicio...")
+                    restart_game(driver)
+                    last_board = None
+                    consecutive_no_change = 0
+                else:
+                    # Si el orden normal falla, mandamos un movimiento alternativo para agitar el tablero
+                    destrabe = "UP" if consecutive_no_change % 2 == 0 else "RIGHT"
+                    send_key(driver, destrabe)
+                    time.sleep(0.15)
             
-            # Pequeña pausa entre movimientos
+            # Pequeña pausa de estabilidad antes del próximo ciclo
             time.sleep(0.05)
             
         except Exception as e:
-            print(f"⚠️ Error: {e}. Recuperando driver...")
-            driver.quit()
+            print(f"⚠️ Error en el bucle: {e}. Recomenzando driver de Selenium...")
+            try:
+                driver.quit()
+            except:
+                pass
             driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
             driver.get("data:text/html," + html)
             time.sleep(2)
