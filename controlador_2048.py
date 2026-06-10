@@ -1,39 +1,70 @@
 import time
 import random
+import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 
 # =========================
-# FUNCIONES DEL TABLERO
+# DESCARGAR JUEGO LOCAL (SIN ANUNCIOS)
+# =========================
+GAME_URL = "https://raw.githubusercontent.com/gabrielecirulli/2048/master/index.html"
+
+def get_local_game_html():
+    """Descarga el HTML del juego desde GitHub (sin recursos externos molestos)."""
+    try:
+        response = requests.get(GAME_URL, timeout=10)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        print(f"❌ Error descargando el juego: {e}")
+        # Fallback: usar un HTML mínimo incrustado (opcional)
+        return None
+
+# =========================
+# CONFIGURACIÓN DE CHROME PARA AZURE
+# =========================
+chrome_options = Options()
+chrome_options.add_argument("--headless")  # Comenta si quieres ver la ventana
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
+chrome_options.add_argument("--disable-gpu")
+chrome_options.add_argument("--disable-web-security")  # Evita CORS en caso de recursos
+chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+chrome_options.add_argument("--window-size=1024,768")
+
+# =========================
+# TABLERO (adaptado al DOM oficial de 2048)
 # =========================
 def empty_board():
     return [[0]*4 for _ in range(4)]
 
 def parse_tiles(driver):
-    """Lee el tablero actual desde el DOM."""
-    tiles = driver.find_elements(By.CLASS_NAME, "tile")
+    """Versión compatible con el HTML original de 2048 (clases 'tile tile-pos-x-y')"""
+    tiles = driver.find_elements(By.CSS_SELECTOR, ".tile")
     board = empty_board()
-    for t in tiles:
+    for tile in tiles:
         try:
-            value = int(t.text)
-            classes = t.get_attribute("class")
-            if "tile-position-" in classes:
-                pos_part = classes.split("tile-position-")[1].split(" ")[0]
-                y, x = map(int, pos_part.split("-"))
-                x -= 1
-                y -= 1
+            value = int(tile.text)
+            # Extraer posición de las clases: tile-position-1-1, etc.
+            classes = tile.get_attribute("class")
+            # Buscar clase tipo "tile-position-*-*"
+            import re
+            match = re.search(r"tile-position-(\d+)-(\d+)", classes)
+            if match:
+                y, x = int(match.group(1)) - 1, int(match.group(2)) - 1
                 if 0 <= x < 4 and 0 <= y < 4:
                     board[y][x] = max(board[y][x], value)
         except:
             pass
     return board
 
+# =========================
+# HEURÍSTICA Y MOVIMIENTOS (deterministas)
+# =========================
 def heuristic_score(board):
-    """Puntuación: más vacías mejor, ficha máxima alta, tablero suave."""
     empty_cells = sum(row.count(0) for row in board)
     max_tile = max(max(row) for row in board)
     smoothness = 0
@@ -42,9 +73,6 @@ def heuristic_score(board):
             smoothness += abs(board[r][c] - board[r][c+1])
     return empty_cells * 1000 + max_tile * 10 - smoothness
 
-# =========================
-# SIMULACIÓN DE MOVIMIENTOS (SIN ALEATORIEDAD)
-# =========================
 def compress(row):
     new = [v for v in row if v != 0]
     new += [0] * (4 - len(new))
@@ -94,7 +122,6 @@ def simulate_move(board, direction):
     return board
 
 def best_move(board):
-    """Elige el movimiento con mayor puntuación heurística (sin azar)."""
     moves = ["UP", "DOWN", "LEFT", "RIGHT"]
     best_score = -1
     best_move_chosen = "UP"
@@ -106,118 +133,94 @@ def best_move(board):
         if score > best_score:
             best_score = score
             best_move_chosen = move
-    # Si ningún movimiento cambia el tablero (caso raro), devolvemos uno cualquiera
     return best_move_chosen if best_score > -1 else random.choice(moves)
 
 # =========================
-# ENVÍO DE TECLAS AL JUEGO
+# ENVIAR TECLA
 # =========================
 def send_move(driver, move):
     driver.execute_script(f"""
-        document.dispatchEvent(new KeyboardEvent('keydown', {{
+        var event = new KeyboardEvent('keydown', {{
             key: 'Arrow{move.title()}',
             code: 'Arrow{move.title()}',
             bubbles: true
-        }}));
+        }});
+        document.dispatchEvent(event);
     """)
 
 # =========================
-# REINICIO ROBUSTO AL PERDER
+# REINICIO AUTOMÁTICO (para la versión local)
 # =========================
 def restart_game(driver):
-    """Intenta reiniciar el juego sin cerrar el script."""
+    """Hace clic en el botón 'New Game' del juego original."""
     try:
-        # Intentar clic en botón "New Game"
-        btn = WebDriverWait(driver, 3).until(
-            EC.element_to_be_clickable((By.CLASS_NAME, "restart-button"))
-        )
-        btn.click()
-        time.sleep(1)
-        driver.find_element(By.TAG_NAME, "body").click()
-        print("🔄 Partida reiniciada (botón)")
+        new_game_btn = driver.find_element(By.CLASS_NAME, "restart-button")
+        new_game_btn.click()
+        time.sleep(0.5)
+        print("🔄 Partida reiniciada")
         return True
     except:
-        try:
-            # Si falla, recargar la página
-            driver.refresh()
-            WebDriverWait(driver, 5).until(
-                EC.presence_of_element_located((By.CLASS_NAME, "tile"))
-            )
-            time.sleep(1)
-            driver.find_element(By.TAG_NAME, "body").click()
-            print("🔄 Partida reiniciada (recarga)")
-            return True
-        except:
-            print("❌ No se pudo reiniciar, se reconstruirá el driver")
-            return False
+        print("⚠️ No se encontró botón New Game, recargando página...")
+        driver.refresh()
+        time.sleep(2)
+        return False
 
 # =========================
 # BUCLE PRINCIPAL (NUNCA SE BLOQUEA)
 # =========================
 def main():
-    # Inicializar driver
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
-    driver.get("https://play2048.co/")
-    
-    # Esperar a que el juego cargue (máximo 10 segundos)
-    try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "tile"))
-        )
-    except:
-        print("⚠️ El juego no cargó a tiempo, recargando...")
-        driver.refresh()
-        time.sleep(3)
-    
+    # 1. Descargar el juego offline
+    print("📥 Descargando juego 2048 sin publicidad...")
+    html_content = get_local_game_html()
+    if not html_content:
+        print("❌ No se pudo obtener el juego. Abortando.")
+        return
+
+    # 2. Iniciar driver con opciones seguras para Azure
+    print("🚀 Iniciando navegador...")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+
+    # 3. Cargar el juego desde una data URI (totalmente local)
+    driver.get("data:text/html," + html_content.replace("#", "%23"))  # Escapar #
+    time.sleep(2)  # Esperar a que cargue el canvas
+
+    # Asegurar foco en el juego
     driver.find_element(By.TAG_NAME, "body").click()
-    print("🚀 Bot inteligente iniciado (movimientos deterministas)")
-    
+    print("✅ Juego cargado correctamente. Bot iniciado.")
+
     while True:
         try:
-            # Leer tablero
             board = parse_tiles(driver)
             if not board or all(v == 0 for row in board for v in row):
-                # Todavía no hay fichas, esperar un poco
                 time.sleep(0.3)
                 continue
-            
-            # Detectar Game Over
-            if "Game Over" in driver.page_source:
-                print("💀 Game Over detectado")
-                if not restart_game(driver):
-                    # Si el reinicio falló, reciclamos el driver
-                    driver.quit()
-                    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
-                    driver.get("https://play2048.co/")
-                    WebDriverWait(driver, 10).until(
-                        EC.presence_of_element_located((By.CLASS_NAME, "tile"))
-                    )
-                    driver.find_element(By.TAG_NAME, "body").click()
-                    print("🚀 Driver reiniciado")
-                time.sleep(0.5)
+
+            # Detectar Game Over (mensaje en el DOM)
+            game_over = driver.find_elements(By.CLASS_NAME, "game-over")
+            if game_over and game_over[0].is_displayed():
+                print("💀 Game Over detectado. Reiniciando...")
+                restart_game(driver)
+                time.sleep(1)
                 continue
-            
-            # Elegir mejor movimiento (no aleatorio)
+
+            # Movimiento inteligente
             move = best_move(board)
             send_move(driver, move)
-            
-            # Pequeña pausa para la animación
-            time.sleep(0.1)
-            
+            time.sleep(0.1)  # Pausa para animación
+
         except Exception as e:
             print(f"⚠️ Error inesperado: {e}")
-            # Intentamos recuperarnos recargando la página
+            # Intento de recuperación: recargar el juego
             try:
                 driver.refresh()
-                time.sleep(3)
+                time.sleep(2)
                 driver.find_element(By.TAG_NAME, "body").click()
-                print("🔄 Página recargada por error")
             except:
                 print("❌ Error crítico, reiniciando driver...")
                 driver.quit()
-                driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()))
-                driver.get("https://play2048.co/")
-                time.sleep(3)
+                driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+                driver.get("data:text/html," + html_content)
+                time.sleep(2)
                 driver.find_element(By.TAG_NAME, "body").click()
             time.sleep(1)
 
