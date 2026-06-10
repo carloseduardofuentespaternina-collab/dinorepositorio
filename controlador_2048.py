@@ -36,7 +36,6 @@ chrome_options.add_argument("--window-size=1024,768")
 # ELIMINAR ANUNCIOS E INTERFERENCIAS (DOM)
 # ==========================================
 def clean_ads(driver):
-    """Borra elementos sospechosos de publicidad que rompen el lector de fichas"""
     script = """
     var iframe = document.getElementsByTagName('iframe');
     while(iframe.length > 0){
@@ -45,15 +44,13 @@ def clean_ads(driver):
     var ads = document.querySelectorAll('[id*="google"], [class*="ads"], [class*="banner"]');
     ads.forEach(function(el) { el.remove(); });
     """
-    try:
-        driver.execute_script(script)
-    except:
-        pass
+    try: driver.execute_script(script)
+    except: pass
 
 # ==========================================
-# OBTENER TABLERO CON JS (BLINDADO)
+# OBTENER TABLERO Y SCORE CON JS
 # ==========================================
-def get_board(driver):
+def get_game_state(driver):
     script = """
     var board = [[0,0,0,0],[0,0,0,0],[0,0,0,0],[0,0,0,0]];
     var tiles = document.getElementsByClassName('tile');
@@ -74,7 +71,17 @@ def get_board(driver):
             }
         }
     }
-    return board;
+    
+    // Obtener puntuación actual
+    var score = 0;
+    var scoreContainer = document.getElementsByClassName('score-container')[0];
+    if (scoreContainer) {
+        // Nos quedamos solo con el primer número antes de cualquier texto de "+4"
+        var scoreText = scoreContainer.innerText.split('\\n')[0];
+        score = parseInt(scoreText.replace(/\\D/g, '')) || 0;
+    }
+
+    return {board: board, score: score};
     """
     return driver.execute_script(script)
 
@@ -142,7 +149,25 @@ def simulate_move(board, direction):
     return sim_board
 
 # ==========================================
-# BUCLE PRINCIPAL CON ANTI-INERCIA
+# EVALUADOR DE MEJOR MOVIMIENTO EQUILIBRADO
+# ==========================================
+def evaluate_best_move(board, valid_moves):
+    """Evalúa cuál movimiento genera más espacios vacíos (más fusiones)"""
+    best_move = valid_moves[0]
+    max_empty = -1
+    
+    # Buscamos qué movimiento deja más ceros en el tablero simulado
+    for move in valid_moves:
+        simulated = simulate_move(board, move)
+        empty_cells = sum(row.count(0) for row in simulated)
+        if empty_cells > max_empty:
+            max_empty = empty_cells
+            best_move = move
+            
+    return best_move
+
+# ==========================================
+# BUCLE PRINCIPAL CORREGIDO
 # ==========================================
 def main():
     html = get_local_game_html()
@@ -154,22 +179,22 @@ def main():
     time.sleep(2)
     clean_ads(driver)
     driver.find_element(By.TAG_NAME, "body").click()
-    print("🚀 Bot Anti-Inercia Iniciado. Objetivo rápido: 256.")
+    print("🚀 Bot de Movimiento Libre Iniciado. Monitoreo por Score activo (Meta: 256).")
     
+    last_score = 0
+    no_score_inc_counter = 0
     last_max_tile = 0
     last_progress_time = time.time()
-    
-    # Historial de teclas consecutivas para romper el desuso de LEFT/DOWN
-    recent_keys = []
-    stuck_counter = 0
-    last_flat_board = None
 
-    # Forzar una estrategia híbrida robusta (Prioriza agrupar, pero permite destrabar)
-    strategic_order = ["RIGHT", "UP", "LEFT", "DOWN"]
+    # Todas las direcciones tienen el mismo derecho a ser usadas
+    all_directions = ["LEFT", "DOWN", "RIGHT", "UP"]
 
     while True:
         try:
-            board = get_board(driver)
+            state = get_game_state(driver)
+            board = state["board"]
+            current_score = state["score"]
+
             if not board or all(v == 0 for row in board for v in row):
                 time.sleep(0.1)
                 continue
@@ -177,7 +202,7 @@ def main():
             # Condición de Victoria en 256
             current_max = max(max(row) for row in board)
             if current_max >= 256:
-                print(f"🎉 ¡VICTORIA! Se alcanzó la ficha {current_max} de forma limpia.")
+                print(f"🎉 ¡VICTORIA ESTRUCTURAL! Alcanzada la ficha {current_max}.")
                 driver.quit()
                 break
             
@@ -185,81 +210,65 @@ def main():
             if driver.find_elements(By.CLASS_NAME, "game-over") and driver.find_element(By.CLASS_NAME, "game-over").is_displayed():
                 print("💀 Game Over. Reiniciando...")
                 restart_game(driver)
+                last_score = 0
+                no_score_inc_counter = 0
                 last_progress_time = time.time()
-                last_max_tile = 0
-                recent_keys.clear()
                 continue
             
-            # Control de reinicio por congelamiento total (45s)
+            # Control de tiempo límite por congelamiento (45s)
             if current_max > last_max_tile:
                 last_max_tile = current_max
                 last_progress_time = time.time()
             elif time.time() - last_progress_time > 45:
-                print("⏱️ Tiempo límite sin combinación estructural. Reiniciando...")
+                print("⏱️ Tablero congelado por tiempo. Reiniciando...")
                 restart_game(driver)
                 last_max_tile = 0
+                last_score = 0
+                no_score_inc_counter = 0
                 last_progress_time = time.time()
-                recent_keys.clear()
                 continue
 
-            # Monitorear si el tablero físicamente no altera sus valores
-            board_flat = tuple(v for row in board for v in row)
-            if board_flat == last_flat_board:
-                stuck_counter += 1
+            # CONTADOR DE ATASCO BASADO EN SCORE REAL
+            if current_score == last_score:
+                no_score_inc_counter += 1
             else:
-                stuck_counter = max(0, stuck_counter - 1)
-            last_flat_board = board_flat
+                no_score_inc_counter = 0 # Restablecer si el score sube
+            last_score = current_score
 
-            # Calcular movimientos físicamente válidos
-            valid_moves = [move for move in strategic_order if simulate_move(board, move) != board]
+            # Calcular qué movimientos cambian realmente el tablero
+            valid_moves = [move for move in all_directions if simulate_move(board, move) != board]
             
             if not valid_moves:
-                print("⚠️ Sin movimientos legales. Reiniciando...")
+                print("⚠️ Sin movimientos disponibles. Reiniciando...")
                 restart_game(driver)
-                last_progress_time = time.time()
-                last_max_tile = 0
-                recent_keys.clear()
+                last_score = 0
+                no_score_inc_counter = 0
                 continue
 
             # ==========================================================
-            # CORRECCIÓN DE COMPORTAMIENTO: OBLIGAR MOVIMIENTOS EVITADOS
+            # ACTIVACIÓN INMEDIATA DEL ALEATORIO POR FALTA DE SCORE
             # ==========================================================
-            # Si en los últimos 4 movimientos el bot usó solo RIGHT/UP y el tablero está estancándose...
-            if len(recent_keys) >= 4 and all(k in ["RIGHT", "UP"] for k in recent_keys[-4:]):
-                # Filtramos para obligarlo a usar LEFT o DOWN si son físicamente posibles
-                forced_moves = [m for m in valid_moves if m in ["LEFT", "DOWN"]]
-                if forced_moves:
-                    chosen_move = forced_moves[0]
-                    print(f"🛠️ Forzando uso de tecla evitada para limpiar tablero: {chosen_move}")
-                else:
-                    chosen_move = random.choice(valid_moves)
-            
-            # Si hay un atasco duro por repetición numérica, ráfaga aleatoria pura
-            elif stuck_counter >= 6 and len(valid_moves) > 1:
-                print("🚨 Atasco por vaivén detectado. Rompiendo con dirección opuesta...")
-                chosen_move = random.choice([m for m in valid_moves if m not in recent_keys[-2:]])
-                stuck_counter = 0
+            if no_score_inc_counter >= 6 and len(valid_moves) > 1:
+                # Si lleva 6 movimientos moviendo piezas sin sumar puntos, está en vaivén.
+                # Elegimos uno aleatorio de la lista de válidos para destrabar las esquinas.
+                chosen_move = random.choice(valid_moves)
+                print(f"🔄 ¡Vaivén detectado por Score! Forzando movimiento aleatorio: {chosen_move}")
+                no_score_inc_counter = 0
             else:
-                # Selección estratégica fluida normal
-                chosen_move = None
-                for move in strategic_order:
-                    if move in valid_moves:
-                        chosen_move = move
-                        break
+                # Selección inteligente basada en optimización de espacio libre
+                chosen_move = evaluate_best_move(board, valid_moves)
 
-            # Guardar historial de movimientos ejecutados
-            recent_keys.append(chosen_move)
-            if len(recent_keys) > 10:
-                recent_keys.pop(0)
-
-            # Ejecutar e inyectar limpieza de anuncios en paralelo para asegurar el DOM
+            # Ejecutar movimiento
             send_key(driver, chosen_move)
-            if random.random() < 0.1:  # Limpia anuncios cada 10 movimientos de forma silenciosa
+            
+            # Limpieza silenciosa de Ads periódica
+            if random.random() < 0.05:
                 clean_ads(driver)
-            time.sleep(0.13)  
+                
+            time.sleep(0.12)  
             
         except Exception as e:
-            print(f"⚠️ Error: {e}. Reajustando entorno Selenium...")
+            print(f"⚠️ Error controlado: {e}. Reajustando Selenium...")
             try: driver.quit()
             except: pass
             driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
