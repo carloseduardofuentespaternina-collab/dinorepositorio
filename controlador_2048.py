@@ -8,7 +8,7 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 
 # =========================
-# OBTENER HTML DEL JUEGO (SIN PUBLICIDAD)
+# OBTENER HTML LOCAL (SIN ANUNCIOS)
 # =========================
 GAME_URL = "https://raw.githubusercontent.com/gabrielecirulli/2048/master/index.html"
 
@@ -22,14 +22,13 @@ def get_local_game_html():
         return None
 
 # =========================
-# CONFIGURACIÓN CHROME (PARA AZURE)
+# CONFIGURACIÓN CHROME
 # =========================
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Comentar si quieres ver ventana
+chrome_options.add_argument("--headless")  # Quita esto si quieres ver la ventana
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("--disable-web-security")
 chrome_options.add_argument("--window-size=1024,768")
 
 # =========================
@@ -57,12 +56,16 @@ def get_board_js(driver):
     return driver.execute_script(script)
 
 # =========================
-# HEURÍSTICA MEJORADA
+# HEURÍSTICA MEJORADA (PESA MUCHO LAS FUSIONES Y LA LIBERTAD)
 # =========================
-def heuristic_score(board):
+def heuristic_score(board, previous_score=0):
     empty_cells = sum(row.count(0) for row in board)
     max_tile = max(max(row) for row in board)
-    corner_bonus = board[0][0] * 2
+    
+    # Bonificación grande por tener la ficha más alta en la esquina superior izquierda
+    corner_bonus = board[0][0] * 3
+    
+    # Suavidad (diferencias entre vecinos) - se penaliza la rugosidad
     smoothness = 0
     for r in range(4):
         for c in range(3):
@@ -70,23 +73,37 @@ def heuristic_score(board):
     for c in range(4):
         for r in range(3):
             smoothness += abs(board[r][c] - board[r+1][c])
-    monotonicity = 0
+    
+    # Monotonicidad (prefiere filas/columnas ordenadas)
+    mono = 0
     for r in range(4):
         for c in range(3):
             if board[r][c] >= board[r][c+1]:
-                monotonicity += board[r][c] - board[r][c+1]
+                mono += board[r][c] - board[r][c+1]
             else:
-                monotonicity -= board[r][c+1] - board[r][c]
+                mono -= board[r][c+1] - board[r][c]
     for c in range(4):
         for r in range(3):
             if board[r][c] >= board[r+1][c]:
-                monotonicity += board[r][c] - board[r+1][c]
+                mono += board[r][c] - board[r+1][c]
             else:
-                monotonicity -= board[r+1][c] - board[r][c]
-    return empty_cells * 800 + max_tile * 50 + corner_bonus + monotonicity - smoothness
+                mono -= board[r+1][c] - board[r][c]
+    
+    # Recompensa por tener fichas iguales adyacentes (para fusionar)
+    merge_potential = 0
+    for r in range(4):
+        for c in range(3):
+            if board[r][c] == board[r][c+1] and board[r][c] != 0:
+                merge_potential += board[r][c] * 2
+    for c in range(4):
+        for r in range(3):
+            if board[r][c] == board[r+1][c] and board[r][c] != 0:
+                merge_potential += board[r][c] * 2
+    
+    return empty_cells * 1000 + max_tile * 200 + corner_bonus + mono * 10 - smoothness * 2 + merge_potential
 
 # =========================
-# SIMULACIÓN DE MOVIMIENTOS
+# SIMULACIÓN DE MOVIMIENTOS (EXACTA)
 # =========================
 def compress(row):
     new = [v for v in row if v != 0]
@@ -101,13 +118,13 @@ def merge(row):
     return row
 
 def move_row_left(row):
-    row = compress(row)
+    row = compress(row[:])
     row = merge(row)
     row = compress(row)
     return row
 
 def move_board_left(board):
-    return [move_row_left(row[:]) for row in board]
+    return [move_row_left(row) for row in board]
 
 def move_board_right(board):
     return [move_row_left(row[::-1])[::-1] for row in board]
@@ -136,36 +153,38 @@ def simulate_move(board, direction):
         return move_board_right(board)
     return board
 
-def best_move(board, last_move, stuck_counter, mode_explore=False):
+def best_move(board, last_move, consecutive_fails):
     moves = ["UP", "DOWN", "LEFT", "RIGHT"]
     scores = []
     for move in moves:
         new_board = simulate_move(board, move)
+        # Si no cambia el tablero, puntuación extremadamente baja
         if new_board == board:
-            scores.append((move, -10000))
+            scores.append((move, -100000))
         else:
             score = heuristic_score(new_board)
             scores.append((move, score))
+    
+    # Ordenar por puntuación descendente
     scores.sort(key=lambda x: x[1], reverse=True)
     
-    # Modo exploración: elegir aleatorio entre los dos mejores (para romper loops)
-    if mode_explore:
-        best_two = scores[:2]
-        return random.choice([best_two[0][0], best_two[1][0]] if len(best_two) > 1 else [scores[0][0]])
+    # Si estamos teniendo muchos fallos (movimientos sin cambio), forzar el que no sea el último
+    if consecutive_fails >= 2:
+        # Elegir el primer movimiento que no sea igual al último, si existe
+        for move, _ in scores:
+            if move != last_move:
+                return move
+        return scores[0][0]
     
-    # Si estamos muy estancados, elegir un movimiento diferente al último
-    if stuck_counter > 4 and len(scores) > 1:
-        if scores[0][0] == last_move:
-            return scores[1][0]
-    
-    # Si el mejor es el mismo que el anterior, a veces cambiar
+    # Si el mejor movimiento es el mismo que el anterior y hay segundo, 40% de probabilidad de cambiar
     if last_move and scores[0][0] == last_move and len(scores) > 1:
         if random.random() < 0.4:
             return scores[1][0]
+    
     return scores[0][0]
 
 # =========================
-# ENVIAR MOVIMIENTO
+# ENVIAR MOVIMIENTO (JS)
 # =========================
 def send_move(driver, move):
     driver.execute_script(f"""
@@ -185,7 +204,7 @@ def restart_game(driver):
         btn = driver.find_element(By.CLASS_NAME, "restart-button")
         btn.click()
         time.sleep(0.8)
-        print("🔄 Reiniciado")
+        print("🔄 Partida reiniciada")
         return True
     except:
         driver.refresh()
@@ -193,7 +212,7 @@ def restart_game(driver):
         return False
 
 # =========================
-# BUCLE PRINCIPAL CON ESTANCAMIENTO MEJORADO
+# BUCLE PRINCIPAL CON CONTROL DE ESTANCAMIENTO
 # =========================
 def main():
     print("📥 Descargando juego 2048...")
@@ -209,16 +228,16 @@ def main():
     
     last_board = None
     last_move = None
-    stuck_counter = 0
     no_change_counter = 0
     last_max_tile = 0
-    mode_explore = False
-    explore_until = 0  # Timestamp hasta cuando explorar
+    moves_without_progress = 0
+    last_score = 0
     
     while True:
         try:
-            time.sleep(0.08)  # Espera breve
+            time.sleep(0.08)  # Pequeña pausa para estabilidad
             board = get_board_js(driver)
+            
             if not board or all(v == 0 for row in board for v in row):
                 time.sleep(0.3)
                 continue
@@ -229,55 +248,48 @@ def main():
                 restart_game(driver)
                 time.sleep(1)
                 last_board = None
-                stuck_counter = 0
-                mode_explore = False
+                no_change_counter = 0
+                moves_without_progress = 0
                 continue
             
-            # Calcular ficha máxima actual
+            # Calcular puntuación actual (heurística simple)
             current_max = max(max(row) for row in board)
+            current_empty = sum(row.count(0) for row in board)
+            current_score = current_max * 100 + current_empty * 10
+            
+            # Detectar progreso
             if current_max > last_max_tile:
+                moves_without_progress = 0
                 last_max_tile = current_max
-                stuck_counter = 0
-                no_change_counter = 0
-                mode_explore = False
             else:
-                # Si no ha mejorado la ficha máxima en varios ciclos, incrementar contador
-                if last_board is not None:
-                    if board == last_board:
-                        no_change_counter += 1
-                    else:
-                        no_change_counter = 0
-                # Estancamiento: si llevamos 8 movimientos sin mejorar ficha máxima
-                if stuck_counter > 8:
-                    print("⚠️ Estancamiento grave, activando modo exploración...")
-                    mode_explore = True
-                    explore_until = time.time() + 5  # 5 segundos de exploración
-                elif stuck_counter > 5 and not mode_explore:
-                    print("⚠️ Estancamiento moderado, aumentando aleatoriedad...")
+                moves_without_progress += 1
             
-            # Si estamos en modo exploración, verificar si ya pasó el tiempo
-            if mode_explore and time.time() > explore_until:
-                mode_explore = False
-                print("✅ Volviendo a modo normal")
+            # Detectar si el tablero cambió después del movimiento anterior
+            if last_board is not None:
+                if board == last_board:
+                    no_change_counter += 1
+                else:
+                    no_change_counter = 0
+            else:
+                no_change_counter = 0
             
-            # Forzar aleatorio si no hay cambios después de 2 movimientos
-            if no_change_counter >= 2:
-                print("⚠️ Sin cambios, forzando movimiento aleatorio")
+            # Si llevamos muchos movimientos sin progreso O sin cambios, forzar movimiento aleatorio
+            if moves_without_progress > 12 or no_change_counter >= 2:
+                print(f"⚠️ Estancamiento (sin progreso: {moves_without_progress}, sin cambios: {no_change_counter}). Forzando movimiento aleatorio...")
                 move = random.choice(["UP", "DOWN", "LEFT", "RIGHT"])
                 no_change_counter = 0
-                stuck_counter += 1
+                moves_without_progress = 0
             else:
-                move = best_move(board, last_move, stuck_counter, mode_explore)
+                move = best_move(board, last_move, no_change_counter)
             
             send_move(driver, move)
             last_move = move
             last_board = [row[:] for row in board]
-            stuck_counter += 1
             
             time.sleep(0.1)
             
         except Exception as e:
-            print(f"⚠️ Error: {e}. Recuperando...")
+            print(f"⚠️ Error inesperado: {e}. Recuperando...")
             try:
                 driver.refresh()
                 time.sleep(2)
