@@ -82,7 +82,7 @@ def restart_game(driver):
     print("🔄 Juego reiniciado")
 
 # =========================
-# BUCLE PRINCIPAL OPTIMIZADO
+# BUCLE PRINCIPAL CON ANTI-BLOQUEO
 # =========================
 def main():
     html = get_local_game_html()
@@ -100,7 +100,7 @@ def main():
     last_max_tile = 0
     last_progress_time = time.time()
     
-    # Estrategia estricta de esquina: Prioridad Izquierda -> Abajo -> Derecha -> Arriba
+    # Estrategia base para arrinconar fichas abajo a la izquierda
     moves_order = ["LEFT", "DOWN", "RIGHT", "UP"]
     
     while True:
@@ -119,7 +119,7 @@ def main():
                 last_progress_time = time.time()
                 continue
             
-            # 2. Control de progreso (Subido a 40s porque en niveles altos toma tiempo subir la ficha máxima)
+            # 2. Control de progreso (Límite tolerante de 40s para evitar reinicios innecesarios en puntajes altos)
             current_max = max(max(row) for row in board)
             if current_max > last_max_tile:
                 last_max_tile = current_max
@@ -132,36 +132,43 @@ def main():
                 last_board = None
                 continue
             
-            # 3. Intentar movimientos en orden de prioridad
+            # 3. Intentar movimientos en orden de prioridad estratégica
             move_executed = False
             for move in moves_order:
                 send_key(driver, move)
-                
-                # Tiempo prudente para que termine la animación del movimiento en el navegador
-                time.sleep(0.12) 
+                time.sleep(0.12)  # Tiempo crucial para que la animación termine en el navegador
                 
                 new_board = get_board(driver)
                 if new_board != board:
                     last_board = new_board
                     move_executed = True
-                    consecutive_no_change = 0  # Reseteamos contador ya que el tablero sí cambió
-                    break  # Rompe el 'for' para iniciar el siguiente ciclo del 'while' con el nuevo tablero
+                    consecutive_no_change = 0  # Reseteamos contador de bloqueos
+                    break  # Continuamos con el bucle principal y el nuevo tablero
             
-            # 4. Gestión en caso de que los movimientos prioritarios fallen (Tablero atascado)
+            # 4. SISTEMA DE DESATASCO AGRESIVO (Para situaciones extremas)
             if not move_executed:
                 consecutive_no_change += 1
-                print(f"⚠️ Tablero estático. Intento de desatasco ({consecutive_no_change}/5)")
+                print(f"⚠️ Tablero estático. Activando protocolo de desatasco ({consecutive_no_change}/5)")
                 
                 if consecutive_no_change >= 5:
-                    print("❌ El tablero está completamente bloqueado. Forzando reinicio...")
+                    print("❌ El tablero está completamente bloqueado sin movimientos legales. Forzando reinicio...")
                     restart_game(driver)
                     last_board = None
                     consecutive_no_change = 0
-                else:
-                    # Si el orden normal falla, mandamos un movimiento alternativo para agitar el tablero
-                    destrabe = "UP" if consecutive_no_change % 2 == 0 else "RIGHT"
-                    send_key(driver, destrabe)
-                    time.sleep(0.15)
+                    continue
+                
+                # Si la estrategia normal falló por completo, probamos todas las direcciones de forma exhaustiva
+                emergency_moves = ["UP", "RIGHT", "DOWN", "LEFT"]
+                for emergency_move in emergency_moves:
+                    send_key(driver, emergency_move)
+                    time.sleep(0.12)
+                    new_board = get_board(driver)
+                    if new_board != board:
+                        print(f"🔓 Desatascado con éxito usando movimiento de emergencia: {emergency_move}")
+                        last_board = new_board
+                        move_executed = True
+                        consecutive_no_change = 0
+                        break
             
             # Pequeña pausa de estabilidad antes del próximo ciclo
             time.sleep(0.05)
