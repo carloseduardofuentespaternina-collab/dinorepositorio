@@ -7,7 +7,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 
-
 # =========================
 # CONFIGURACIÓN CHROME
 # =========================
@@ -23,41 +22,64 @@ driver = webdriver.Chrome(
 
 
 # =========================
+# DIAGNÓSTICO: ver clases reales del DOM
+# =========================
+def debug_tiles():
+    tiles = driver.find_elements(By.CSS_SELECTOR, ".tile")
+    print(f"\n[DEBUG] Tiles encontrados: {len(tiles)}")
+    for t in tiles:
+        print("  →", t.get_attribute("class"))
+
+
+# =========================
 # LEER EL TABLERO DESDE EL DOM
+# Soporta ambos formatos:
+#   tile-position-COL-ROW  (formato clásico play2048.co)
+#   tile-position-ROW-COL  (algunos forks)
 # =========================
 def get_board():
-    """Lee el estado actual del tablero (4x4) desde el DOM."""
     board = [[0] * 4 for _ in range(4)]
     tiles = driver.find_elements(By.CSS_SELECTOR, ".tile")
+
     for tile in tiles:
         classes = tile.get_attribute("class").split()
         value = 0
-        row = col = 0
+        row = col = -1
+
         for cls in classes:
+            # Valor: tile-2, tile-4, tile-16, tile-1024...
             if cls.startswith("tile-") and cls[5:].isdigit():
                 value = int(cls[5:])
+            # Posición: tile-position-C-R
             if cls.startswith("tile-position-"):
                 parts = cls.replace("tile-position-", "").split("-")
-                if len(parts) == 2:
-                    col = int(parts[0]) - 1  # 1-indexed → 0-indexed
-                    row = int(parts[1]) - 1
+                if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                    col = int(parts[0]) - 1  # columna (1-based → 0-based)
+                    row = int(parts[1]) - 1  # fila    (1-based → 0-based)
+
         if value > 0 and 0 <= row < 4 and 0 <= col < 4:
-            board[row][col] = value
+            # Si ya hay un valor mayor en esa celda (tile fusionado), conservarlo
+            if board[row][col] < value:
+                board[row][col] = value
+
     return board
+
+
+def board_is_empty(board):
+    return all(board[r][c] == 0 for r in range(4) for c in range(4))
 
 
 def print_board(board):
     print("\n+" + "------+" * 4)
     for row in board:
         print("|" + "|".join(f"{v:^6}" if v else "      " for v in row) + "|")
-        print("+" + "------+" * 4)
+    print("+" + "------+" * 4)
 
 
 # =========================
-# LÓGICA DE SIMULACIÓN DE MOVIMIENTOS
+# LÓGICA DE SIMULACIÓN
 # =========================
 def slide_row_left(row):
-    """Desliza y fusiona una fila hacia la izquierda."""
     tiles = [x for x in row if x != 0]
     merged = []
     skip = False
@@ -73,48 +95,31 @@ def slide_row_left(row):
     merged += [0] * (4 - len(merged))
     return merged
 
-
 def move_left(board):
     return [slide_row_left(row) for row in board]
-
 
 def move_right(board):
     return [slide_row_left(row[::-1])[::-1] for row in board]
 
-
 def transpose(board):
     return [[board[r][c] for r in range(4)] for c in range(4)]
-
 
 def move_up(board):
     return transpose(move_left(transpose(board)))
 
-
 def move_down(board):
     return transpose(move_right(transpose(board)))
 
-
 def board_changed(b1, b2):
     return any(b1[r][c] != b2[r][c] for r in range(4) for c in range(4))
-
 
 def get_empty_cells(board):
     return [(r, c) for r in range(4) for c in range(4) if board[r][c] == 0]
 
 
-def add_random_tile(board):
-    empty = get_empty_cells(board)
-    if empty:
-        r, c = random.choice(empty)
-        board[r][c] = 4 if random.random() < 0.1 else 2
-    return board
-
-
 # =========================
-# HEURÍSTICAS DE PUNTUACIÓN
+# HEURÍSTICAS
 # =========================
-
-# Pesos para la esquina inferior-izquierda (snake pattern)
 WEIGHT_MATRIX = [
     [2**15, 2**14, 2**13, 2**12],
     [2**8,  2**9,  2**10, 2**11],
@@ -122,34 +127,23 @@ WEIGHT_MATRIX = [
     [2**0,  2**1,  2**2,  2**3],
 ]
 
-
 def score_board(board):
-    """Puntúa el tablero combinando múltiples heurísticas."""
     score = 0
-
-    # 1. Snake weight: recompensa tener tiles grandes en posiciones de alto peso
     for r in range(4):
         for c in range(4):
             score += board[r][c] * WEIGHT_MATRIX[r][c]
-
-    # 2. Celdas vacías: más celdas libres = más maniobra
     empty = len(get_empty_cells(board))
-    score += empty * 1000
-
-    # 3. Monotonía: penaliza filas/columnas que no son monótonas
+    score += empty * 1500
     for row in board:
         non_zero = [x for x in row if x]
         for i in range(len(non_zero) - 1):
             if non_zero[i] < non_zero[i + 1]:
-                score -= non_zero[i + 1]
-
+                score -= non_zero[i + 1] * 2
     for c in range(4):
         col = [board[r][c] for r in range(4) if board[r][c]]
         for i in range(len(col) - 1):
             if col[i] < col[i + 1]:
-                score -= col[i + 1]
-
-    # 4. Suavidad: penaliza diferencias grandes entre tiles adyacentes
+                score -= col[i + 1] * 2
     for r in range(4):
         for c in range(4):
             if board[r][c]:
@@ -157,20 +151,15 @@ def score_board(board):
                     nr, nc = r + dr, c + dc
                     if 0 <= nr < 4 and 0 <= nc < 4 and board[nr][nc]:
                         score -= abs(board[r][c] - board[nr][nc])
-
     return score
 
 
-# =========================
-# EXPECTIMAX (profundidad 3)
-# =========================
 MOVES = {
     "UP":    move_up,
     "DOWN":  move_down,
     "LEFT":  move_left,
     "RIGHT": move_right,
 }
-
 MOVE_KEYS = {
     "UP":    Keys.UP,
     "DOWN":  Keys.DOWN,
@@ -182,7 +171,6 @@ MOVE_KEYS = {
 def expectimax(board, depth, is_player):
     if depth == 0:
         return score_board(board)
-
     if is_player:
         best = float("-inf")
         for fn in MOVES.values():
@@ -191,14 +179,12 @@ def expectimax(board, depth, is_player):
                 val = expectimax(new_board, depth - 1, False)
                 best = max(best, val)
         return best if best != float("-inf") else score_board(board)
-
-    else:  # Nodo de azar (aparece tile 2 o 4 en celda vacía)
+    else:
         empty = get_empty_cells(board)
         if not empty:
             return score_board(board)
-        total = 0
-        # Para eficiencia, muestreamos hasta 4 celdas vacías aleatoriamente
         sampled = random.sample(empty, min(len(empty), 4))
+        total = 0
         for r, c in sampled:
             for val, prob in [(2, 0.9), (4, 0.1)]:
                 new_board = [row[:] for row in board]
@@ -208,10 +194,8 @@ def expectimax(board, depth, is_player):
 
 
 def best_move(board, depth=3):
-    """Elige el mejor movimiento usando Expectimax."""
     best_score = float("-inf")
     best_dir = None
-    # Orden de preferencia por defecto si empatan
     for direction, fn in MOVES.items():
         new_board = fn(board)
         if board_changed(board, new_board):
@@ -223,18 +207,28 @@ def best_move(board, depth=3):
 
 
 # =========================
-# DETECCIÓN DE VICTORIA / DERROTA
+# FALLBACK: estrategia simple si no puede leer el tablero
+# =========================
+FALLBACK_SEQUENCE = [Keys.LEFT, Keys.UP, Keys.RIGHT, Keys.DOWN]
+
+def fallback_move(i):
+    """Estrategia de esquina cuando el DOM no se puede leer."""
+    # Preferencia: LEFT > UP > RIGHT > DOWN (mantiene tiles a la izquierda-arriba)
+    return FALLBACK_SEQUENCE[i % len(FALLBACK_SEQUENCE)]
+
+
+# =========================
+# DETECCIÓN DE FIN DE JUEGO
 # =========================
 def has_won(board):
     return any(board[r][c] >= 2048 for r in range(4) for c in range(4))
 
-
 def is_game_over_dom():
-    elements = driver.find_elements(
-        By.CSS_SELECTOR, ".game-message.game-over"
-    )
-    return bool(elements and elements[0].is_displayed())
-
+    try:
+        elements = driver.find_elements(By.CSS_SELECTOR, ".game-message.game-over")
+        return bool(elements and elements[0].is_displayed())
+    except:
+        return False
 
 def max_tile(board):
     return max(board[r][c] for r in range(4) for c in range(4))
@@ -252,14 +246,37 @@ try:
     body.click()
     time.sleep(0.5)
 
-    print("🎮 Juego iniciado — usando estrategia Expectimax + Corner\n")
+    # --- DIAGNÓSTICO INICIAL ---
+    debug_tiles()
+
+    print("\n🎮 Juego iniciado — Expectimax + Corner Strategy\n")
 
     move_count = 0
     last_print = 0
-    depth = 3  # Aumentar a 4 para más inteligencia (más lento)
+    empty_reads = 0       # contador de lecturas vacías consecutivas
+    depth = 3
 
     while True:
         board = get_board()
+
+        # ¿El tablero está vacío? (problema de lectura DOM)
+        if board_is_empty(board):
+            empty_reads += 1
+            if empty_reads <= 3 and move_count == 0:
+                # Al inicio, esperamos un poco más
+                time.sleep(0.5)
+                continue
+            # Usar fallback
+            key = fallback_move(move_count)
+            body.send_keys(key)
+            move_count += 1
+            time.sleep(0.1)
+            if empty_reads % 20 == 1:
+                print(f"⚠️  No se puede leer el tablero (mov {move_count}), usando fallback...")
+                debug_tiles()
+            continue
+        else:
+            empty_reads = 0
 
         if move_count - last_print >= 50:
             print_board(board)
@@ -273,19 +290,22 @@ try:
 
         if is_game_over_dom():
             print(f"\n💀 Game Over tras {move_count} movimientos.")
-            print(f"   Tile máximo alcanzado: {max_tile(board)}")
+            print(f"   Tile máximo: {max_tile(board)}")
             print_board(board)
             break
 
         direction = best_move(board, depth=depth)
 
         if direction is None:
-            print("⚠️  No hay movimientos válidos.")
-            break
+            # No hay movimiento válido según la simulación
+            print("⚠️  Expectimax sin movimiento válido, usando fallback.")
+            key = fallback_move(move_count)
+            body.send_keys(key)
+        else:
+            body.send_keys(MOVE_KEYS[direction])
 
-        body.send_keys(MOVE_KEYS[direction])
         move_count += 1
-        time.sleep(0.05)  # Pequeña pausa para que el DOM se actualice
+        time.sleep(0.05)
 
     print("\nProceso finalizado.")
 
