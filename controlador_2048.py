@@ -1,4 +1,5 @@
 import time
+import random
 
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -7,71 +8,71 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
 
-# Configuración de Chrome
+
+# =========================
+# CONFIGURACIÓN CHROME
+# =========================
 chrome_options = Options()
-
 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-chrome_options.add_experimental_option(
-    "excludeSwitches",
-    ["enable-automation"]
-)
-chrome_options.add_experimental_option(
-    "useAutomationExtension",
-    False
-)
+chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+chrome_options.add_experimental_option("useAutomationExtension", False)
 
-# Abrir Chrome
 driver = webdriver.Chrome(
     service=Service(ChromeDriverManager().install()),
     options=chrome_options
 )
 
 try:
-
-    print("Conectando al juego 2048...")
+    print("Abriendo 2048...")
 
     driver.get("https://play2048.co/")
-
     time.sleep(3)
 
+    # =========================
+    # IMPORTANTE: DAR FOCO AL JUEGO
+    # =========================
     body = driver.find_element(By.TAG_NAME, "body")
+    body.click()
 
     print("Juego iniciado")
 
+    # Movimientos básicos (estrategia simple)
     movimientos = [
         Keys.UP,
         Keys.RIGHT,
-        Keys.UP,
-        Keys.RIGHT
+        Keys.DOWN,
+        Keys.LEFT
     ]
 
-    for i in range(2000):
+    i = 0
 
-        body.send_keys(
-            movimientos[i % len(movimientos)]
-        )
+    while True:
 
-        if i % 100 == 0:
-            print(f"Movimiento: {i}")
+        # Enviar movimiento
+        body.send_keys(movimientos[i % len(movimientos)])
+        i += 1
 
-        # Detectar Game Over
+        # Mostrar progreso
+        if i % 50 == 0:
+            print(f"Movimientos realizados: {i}")
+
+        # Detectar GAME OVER (más robusto)
         game_over = driver.find_elements(
-            By.CLASS_NAME,
-            "game-over"
+            By.CSS_SELECTOR,
+            ".game-over, .game-message.game-over"
         )
 
         if game_over:
-            print("Juego terminado")
+            print("💀 Juego terminado")
             break
 
-        time.sleep(0.05)
+        time.sleep(0.1)
 
-    print("Prueba finalizada con éxito")
+    print("Proceso finalizado")
 
 except Exception as e:
-    print(f"Error en la ejecución: {e}")
-    raise
+    print(f"Error: {e}")
 
 finally:
-    time.sleep(5)
+    time.sleep(3)
     driver.quit()
