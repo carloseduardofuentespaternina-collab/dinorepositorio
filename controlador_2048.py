@@ -120,7 +120,31 @@ def simulate_move(board, direction):
     return sim_board
 
 # ==========================================
-# BUCLE PRINCIPAL CON ANTIBUCLE ALEATORIO
+# DETECTOR DINÁMICO DE MEJOR ESQUINA
+# ==========================================
+def get_dynamic_moves_order(board):
+    """Encuentra la ficha más grande y adapta el orden de movimientos a esa esquina"""
+    max_val = -1
+    best_row, best_col = 0, 0
+    
+    for r in range(4):
+        for c in range(4):
+            if board[r][c] > max_val:
+                max_val = board[r][c]
+                best_row, best_col = r, c
+                
+    # Determinar qué esquina es según la posición de la ficha más grande
+    if best_row >= 2 and best_col < 2:   # Abajo Izquierda
+        return ["LEFT", "DOWN", "RIGHT", "UP"]
+    elif best_row >= 2 and best_col >= 2: # Abajo Derecha
+        return ["RIGHT", "DOWN", "LEFT", "UP"]
+    elif best_row < 2 and best_col >= 2:  # Arriba Derecha (Tu caso actual de las capturas)
+        return ["RIGHT", "UP", "LEFT", "DOWN"]
+    else:                                 # Arriba Izquierda
+        return ["LEFT", "UP", "RIGHT", "DOWN"]
+
+# ==========================================
+# BUCLE PRINCIPAL PERFECCIONADO
 # ==========================================
 def main():
     html = get_local_game_html()
@@ -131,16 +155,13 @@ def main():
     driver.get("data:text/html," + html)
     time.sleep(2)
     driver.find_element(By.TAG_NAME, "body").click()
-    print("🚀 Bot Inteligente con Anti-Bucle Iniciado.")
+    print("🚀 Bot Adaptativo de Alto Rendimiento Iniciado.")
     
     last_max_tile = 0
     last_progress_time = time.time()
     
-    # Historial para detectar si el tablero se repite (bucles de vaivén)
-    board_history = []
-    
-    # Prioridades estratégicas normales
-    strategic_order = ["LEFT", "DOWN", "RIGHT", "UP"]
+    # Sistema inteligente anti-vaivén basado en conteo de acciones
+    recent_moves = []
     
     while True:
         try:
@@ -149,66 +170,68 @@ def main():
                 time.sleep(0.1)
                 continue
             
-            # 1. Detectar Game Over Oficial
+            # 1. Game Over Real
             if driver.find_elements(By.CLASS_NAME, "game-over") and driver.find_element(By.CLASS_NAME, "game-over").is_displayed():
-                print("💀 Game Over oficial. Reiniciando...")
+                print("💀 Game Over detectado de verdad. Reiniciando...")
                 restart_game(driver)
                 last_progress_time = time.time()
                 last_max_tile = 0
-                board_history.clear()
+                recent_moves.clear()
                 continue
             
-            # 2. Control de progreso general (60 segundos máximo sin subir ficha más alta)
+            # 2. Control de Bloqueo por tiempo prolongado (60s de seguridad)
             current_max = max(max(row) for row in board)
             if current_max > last_max_tile:
                 last_max_tile = current_max
                 last_progress_time = time.time()
             elif time.time() - last_progress_time > 60:
-                print("⏱️ Sin progreso global en 60 segundos. Forzando reinicio...")
+                print("⏱️ Sin avance en la ficha máxima por 60 segundos. Reiniciando...")
                 restart_game(driver)
                 last_max_tile = 0
                 last_progress_time = time.time()
-                board_history.clear()
+                recent_moves.clear()
                 continue
             
-            # 3. Guardar estado en el historial (mantenemos los últimos 6 estados)
-            board_flat = tuple(v for row in board for v in row)
-            board_history.append(board_flat)
-            if len(board_history) > 6:
-                board_history.pop(0)
+            # 3. Adaptar la estrategia a donde estén tus fichas valiosas reales
+            strategic_order = get_dynamic_moves_order(board)
             
-            # 4. Calcular movimientos físicamente válidos
+            # 4. Calcular qué movimientos modifican matemáticamente el tablero
             valid_moves = [move for move in strategic_order if simulate_move(board, move) != board]
             
             if not valid_moves:
-                print("⚠️ No existen movimientos legales posibles. Reiniciando...")
+                print("⚠️ Atrapado sin salidas legales. Forzando reinicio...")
                 restart_game(driver)
                 last_progress_time = time.time()
                 last_max_tile = 0
-                board_history.clear()
+                recent_moves.clear()
                 continue
             
-            # 5. DETECTOR DE BUCLES (Si el tablero actual ya se vio 3 veces en los últimos movimientos)
-            if board_history.count(board_flat) >= 3 and len(valid_moves) > 1:
-                # ¡Pánico! Estamos atrapados en un bucle de vaivén.
-                # Elegimos un movimiento completamente aleatorio de los que sí son válidos para romper el ritmo
-                chosen_move = random.choice(valid_moves)
-                print(f"🔄 ¡Bucle infinito detectado! Rompiendo ritmo con movimiento aleatorio: {chosen_move}")
-                board_history.clear() # Limpiamos historial para no encadenar pánicos
+            # 5. DETECTOR INTEGRAL DE PING-PONG / VAIVÉN
+            # Si el bot lleva más de 4 movimientos alternando de un lado a otro de forma repetitiva...
+            if len(recent_moves) >= 4 and len(set(recent_moves[-4:])) <= 2 and len(valid_moves) > 1:
+                # Elige un movimiento aleatorio válido que NO sea el último que causó el bucle
+                chosen_move = random.choice([m for m in valid_moves if m != recent_moves[-1]])
+                print(f"🔄 ¡Alerta de bucle de vaivén! Rompiendo con movimiento impredecible: {chosen_move}")
+                recent_moves.clear()
             else:
-                # Selección estratégica normal
+                # Selección adaptativa normal según la esquina dominante actual
                 chosen_move = None
                 for move in strategic_order:
                     if move in valid_moves:
                         chosen_move = move
                         break
             
-            # 6. Ejecutar el movimiento seleccionado
+            # Guardar en el historial de movimientos ejecutados
+            recent_moves.append(chosen_move)
+            if len(recent_moves) > 10:
+                recent_moves.pop(0)
+            
+            # 6. Enviar comando e introducir delay para suavizar el render del navegador
             send_key(driver, chosen_move)
-            time.sleep(0.14)  # Espera para que la web procese el desplazamiento y la nueva ficha
+            time.sleep(0.15)
             
         except Exception as e:
-            print(f"⚠️ Error detectado: {e}. Reiniciando entorno Selenium...")
+            print(f"⚠️ Error: {e}. Reabriendo Selenium...")
             try: driver.quit()
             except: pass
             driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
