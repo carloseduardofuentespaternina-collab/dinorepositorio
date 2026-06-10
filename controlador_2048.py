@@ -33,7 +33,25 @@ chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--window-size=1024,768")
 
 # ==========================================
-# OBTENER TABLERO CON JS (BLINDADO CONTRA ADS)
+# ELIMINAR ANUNCIOS E INTERFERENCIAS (DOM)
+# ==========================================
+def clean_ads(driver):
+    """Borra elementos sospechosos de publicidad que rompen el lector de fichas"""
+    script = """
+    var iframe = document.getElementsByTagName('iframe');
+    while(iframe.length > 0){
+        iframe[0].parentNode.removeChild(iframe[0]);
+    }
+    var ads = document.querySelectorAll('[id*="google"], [class*="ads"], [class*="banner"]');
+    ads.forEach(function(el) { el.remove(); });
+    """
+    try:
+        driver.execute_script(script)
+    except:
+        pass
+
+# ==========================================
+# OBTENER TABLERO CON JS (BLINDADO)
 # ==========================================
 def get_board(driver):
     script = """
@@ -41,8 +59,6 @@ def get_board(driver):
     var tiles = document.getElementsByClassName('tile');
     for (var i = 0; i < tiles.length; i++) {
         var tile = tiles[i];
-        
-        // Ignorar elementos ocultos o basura de los anuncios
         if (!tile.innerText || tile.offsetParent === null) continue; 
         
         var value = parseInt(tile.innerText.replace(/\\D/g, ''));
@@ -54,7 +70,6 @@ def get_board(driver):
             var col = parseInt(match[1]) - 1;
             var row = parseInt(match[2]) - 1;
             if (row >= 0 && row < 4 && col >= 0 && col < 4) {
-                // Conservar siempre el valor más alto registrado en esa celda
                 board[row][col] = Math.max(board[row][col], value);
             }
         }
@@ -127,29 +142,7 @@ def simulate_move(board, direction):
     return sim_board
 
 # ==========================================
-# DETECTOR DINÁMICO DE MEJOR ESQUINA
-# ==========================================
-def get_dynamic_moves_order(board):
-    max_val = -1
-    best_row, best_col = 0, 0
-    
-    for r in range(4):
-        for c in range(4):
-            if board[r][c] > max_val:
-                max_val = board[r][c]
-                best_row, best_col = r, c
-                
-    if best_row >= 2 and best_col < 2:     # Abajo Izquierda
-        return ["LEFT", "DOWN", "RIGHT", "UP"]
-    elif best_row >= 2 and best_col >= 2:   # Abajo Derecha
-        return ["RIGHT", "DOWN", "LEFT", "UP"]
-    elif best_row < 2 and best_col >= 2:    # Arriba Derecha
-        return ["RIGHT", "UP", "LEFT", "DOWN"]
-    else:                                   # Arriba Izquierda
-        return ["LEFT", "UP", "RIGHT", "DOWN"]
-
-# ==========================================
-# BUCLE PRINCIPAL PERFECCIONADO
+# BUCLE PRINCIPAL CON ANTI-INERCIA
 # ==========================================
 def main():
     html = get_local_game_html()
@@ -159,16 +152,21 @@ def main():
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
     driver.get("data:text/html," + html)
     time.sleep(2)
+    clean_ads(driver)
     driver.find_element(By.TAG_NAME, "body").click()
-    print("🚀 Bot Ultra-Adaptativo Iniciado. Buscando la ficha 256...")
+    print("🚀 Bot Anti-Inercia Iniciado. Objetivo rápido: 256.")
     
     last_max_tile = 0
     last_progress_time = time.time()
     
-    # Contadores estrictos para detectar estancamiento físico
+    # Historial de teclas consecutivas para romper el desuso de LEFT/DOWN
+    recent_keys = []
     stuck_counter = 0
     last_flat_board = None
-    
+
+    # Forzar una estrategia híbrida robusta (Prioriza agrupar, pero permite destrabar)
+    strategic_order = ["RIGHT", "UP", "LEFT", "DOWN"]
+
     while True:
         try:
             board = get_board(driver)
@@ -176,87 +174,99 @@ def main():
                 time.sleep(0.1)
                 continue
             
-            # ==========================================
-            # CORRECCIÓN: DETECTOR INMEDIATO DE 256
-            # ==========================================
+            # Condición de Victoria en 256
             current_max = max(max(row) for row in board)
             if current_max >= 256:
-                print(f"🎉 ¡META ALCANZADA! El bot detectó la ficha {current_max}.")
-                print("🏆 Cerrando de forma segura...")
+                print(f"🎉 ¡VICTORIA! Se alcanzó la ficha {current_max} de forma limpia.")
                 driver.quit()
                 break
             
-            # 1. Game Over Real
+            # Game Over Real
             if driver.find_elements(By.CLASS_NAME, "game-over") and driver.find_element(By.CLASS_NAME, "game-over").is_displayed():
-                print("💀 Game Over en pantalla. Reiniciando...")
+                print("💀 Game Over. Reiniciando...")
                 restart_game(driver)
                 last_progress_time = time.time()
                 last_max_tile = 0
-                stuck_counter = 0
+                recent_keys.clear()
                 continue
             
-            # 2. Control de Bloqueo por tiempo prolongado (45s)
+            # Control de reinicio por congelamiento total (45s)
             if current_max > last_max_tile:
                 last_max_tile = current_max
                 last_progress_time = time.time()
             elif time.time() - last_progress_time > 45:
-                print("⏱️ Demasiado tiempo sin progresar. Forzando reinicio...")
+                print("⏱️ Tiempo límite sin combinación estructural. Reiniciando...")
                 restart_game(driver)
                 last_max_tile = 0
                 last_progress_time = time.time()
-                stuck_counter = 0
+                recent_keys.clear()
                 continue
-            
-            # 3. CONTADOR DE ESTANCAMIENTO TOTAL (Independiente de los anuncios)
+
+            # Monitorear si el tablero físicamente no altera sus valores
             board_flat = tuple(v for row in board for v in row)
             if board_flat == last_flat_board:
                 stuck_counter += 1
             else:
-                stuck_counter = max(0, stuck_counter - 1) # Reducir penalización si se mueve
+                stuck_counter = max(0, stuck_counter - 1)
             last_flat_board = board_flat
-            
-            # 4. Obtener orden estratégico y movimientos válidos simulados
-            strategic_order = get_dynamic_moves_order(board)
+
+            # Calcular movimientos físicamente válidos
             valid_moves = [move for move in strategic_order if simulate_move(board, move) != board]
             
             if not valid_moves:
-                print("⚠️ Sin salidas lógicas. Reiniciando...")
+                print("⚠️ Sin movimientos legales. Reiniciando...")
                 restart_game(driver)
                 last_progress_time = time.time()
                 last_max_tile = 0
-                stuck_counter = 0
+                recent_keys.clear()
                 continue
+
+            # ==========================================================
+            # CORRECCIÓN DE COMPORTAMIENTO: OBLIGAR MOVIMIENTOS EVITADOS
+            # ==========================================================
+            # Si en los últimos 4 movimientos el bot usó solo RIGHT/UP y el tablero está estancándose...
+            if len(recent_keys) >= 4 and all(k in ["RIGHT", "UP"] for k in recent_keys[-4:]):
+                # Filtramos para obligarlo a usar LEFT o DOWN si son físicamente posibles
+                forced_moves = [m for m in valid_moves if m in ["LEFT", "DOWN"]]
+                if forced_moves:
+                    chosen_move = forced_moves[0]
+                    print(f"🛠️ Forzando uso de tecla evitada para limpiar tablero: {chosen_move}")
+                else:
+                    chosen_move = random.choice(valid_moves)
             
-            # 5. EJECUCIÓN FORZADA DE MOVIMIENTOS ALEATORIOS EN CASO DE ATASCO
-            if stuck_counter >= 8 and len(valid_moves) > 1:
-                print("🚨 ¡Bucle/Atasco confirmado por repetición! Ejecutando ráfaga aleatoria...")
-                for _ in range(4):  # Envía 4 movimientos locos seguidos para romper el candado
-                    if valid_moves:
-                        emergency_move = random.choice(valid_moves)
-                        send_key(driver, emergency_move)
-                        time.sleep(0.12)
+            # Si hay un atasco duro por repetición numérica, ráfaga aleatoria pura
+            elif stuck_counter >= 6 and len(valid_moves) > 1:
+                print("🚨 Atasco por vaivén detectado. Rompiendo con dirección opuesta...")
+                chosen_move = random.choice([m for m in valid_moves if m not in recent_keys[-2:]])
                 stuck_counter = 0
-                continue
-            
-            # 6. Movimiento estratégico normal
-            chosen_move = None
-            for move in strategic_order:
-                if move in valid_moves:
-                    chosen_move = move
-                    break
-            
+            else:
+                # Selección estratégica fluida normal
+                chosen_move = None
+                for move in strategic_order:
+                    if move in valid_moves:
+                        chosen_move = move
+                        break
+
+            # Guardar historial de movimientos ejecutados
+            recent_keys.append(chosen_move)
+            if len(recent_keys) > 10:
+                recent_keys.pop(0)
+
+            # Ejecutar e inyectar limpieza de anuncios en paralelo para asegurar el DOM
             send_key(driver, chosen_move)
-            time.sleep(0.14)  # Espera para la animación CSS
+            if random.random() < 0.1:  # Limpia anuncios cada 10 movimientos de forma silenciosa
+                clean_ads(driver)
+            time.sleep(0.13)  
             
         except Exception as e:
-            print(f"⚠️ Error controlado en el entorno: {e}. Reabriendo...")
+            print(f"⚠️ Error: {e}. Reajustando entorno Selenium...")
             try: driver.quit()
             except: pass
             driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
             driver.get("data:text/html," + html)
             time.sleep(2)
+            clean_ads(driver)
             driver.find_element(By.TAG_NAME, "body").click()
-            time.sleep(1)
 
 if __name__ == "__main__":
     main()
