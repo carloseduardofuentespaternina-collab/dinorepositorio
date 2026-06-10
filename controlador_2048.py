@@ -33,7 +33,7 @@ chrome_options.add_argument("--disable-gpu")
 chrome_options.add_argument("--window-size=1024,768")
 
 # ==========================================
-# OBTENER TABLERO CON JS (CORREGIDO PARA 2048)
+# OBTENER TABLERO CON JS (CORREGIDO)
 # ==========================================
 def get_board(driver):
     script = """
@@ -45,7 +45,6 @@ def get_board(driver):
         var classes = tile.className;
         var match = classes.match(/tile-position-(\\d+)-(\\d+)/);
         if (match) {
-            // EN 2048 ORIGINAL: El primer número es la COLUMNA (X) y el segundo es la FILA (Y)
             var col = parseInt(match[1]) - 1;
             var row = parseInt(match[2]) - 1;
             if (row >= 0 && row < 4 && col >= 0 && col < 4) {
@@ -137,13 +136,13 @@ def get_dynamic_moves_order(board):
         return ["LEFT", "DOWN", "RIGHT", "UP"]
     elif best_row >= 2 and best_col >= 2:   # Abajo Derecha
         return ["RIGHT", "DOWN", "LEFT", "UP"]
-    elif best_row < 2 and best_col >= 2:    # Arriba Derecha (Tus capturas reales)
+    elif best_row < 2 and best_col >= 2:    # Arriba Derecha
         return ["RIGHT", "UP", "LEFT", "DOWN"]
     else:                                   # Arriba Izquierda
         return ["LEFT", "UP", "RIGHT", "DOWN"]
 
 # ==========================================
-# BUCLE PRINCIPAL SIN ERRORES DE LECTURA
+# BUCLE PRINCIPAL CON OBJETIVO 256
 # ==========================================
 def main():
     html = get_local_game_html()
@@ -154,7 +153,7 @@ def main():
     driver.get("data:text/html," + html)
     time.sleep(2)
     driver.find_element(By.TAG_NAME, "body").click()
-    print("🚀 Bot Adaptativo Corregido Iniciado.")
+    print("🚀 Bot Adaptativo Iniciado. Objetivo: ¡Alcanzar la ficha 256!")
     
     last_max_tile = 0
     last_progress_time = time.time()
@@ -167,65 +166,72 @@ def main():
                 time.sleep(0.1)
                 continue
             
-            # 1. Game Over Real
+            # ==================================================
+            # ⭐ NUEVA CONDICIÓN DE VICTORIA (OBJETIVO: 256)
+            # ==================================================
+            current_max = max(max(row) for row in board)
+            if current_max >= 256:
+                print(f"🎉 ¡VICTORIA! El bot ha alcanzado la ficha {current_max} exitosamente.")
+                print("🏆 Deteniendo el bot...")
+                driver.quit() # Cierra el navegador de forma limpia
+                break        # Rompe el bucle principal y termina el script
+            
+            # 1. Game Over Real en Pantalla
             if driver.find_elements(By.CLASS_NAME, "game-over") and driver.find_element(By.CLASS_NAME, "game-over").is_displayed():
-                print("💀 Game Over. Reiniciando...")
+                print("💀 Game Over. Reiniciando partida...")
                 restart_game(driver)
                 last_progress_time = time.time()
                 last_max_tile = 0
                 recent_boards.clear()
                 continue
             
-            # 2. Control de Bloqueo por inactividad prolongada (50s)
-            current_max = max(max(row) for row in board)
+            # 2. Control de Bloqueo por tiempo prolongado (50s)
             if current_max > last_max_tile:
                 last_max_tile = current_max
                 last_progress_time = time.time()
             elif time.time() - last_progress_time > 50:
-                print("⏱️ Tablero estancado por mucho tiempo. Forzando reinicio...")
+                print("⏱️ Tablero estancado. Forzando reinicio...")
                 restart_game(driver)
                 last_max_tile = 0
                 last_progress_time = time.time()
                 recent_boards.clear()
                 continue
             
-            # 3. Guardar estado plano en el historial para controlar bucles infinitos
+            # 3. Historial de estados para evitar bucles tontos
             board_flat = tuple(v for row in board for v in row)
             recent_boards.append(board_flat)
             if len(recent_boards) > 8:
                 recent_boards.pop(0)
             
-            # 4. Obtener orden según la posición de la ficha más grande real
+            # 4. Obtener orden de prioridad adaptativo
             strategic_order = get_dynamic_moves_order(board)
             
-            # 5. Filtrar qué movimientos son válidos matemáticamente
+            # 5. Filtrar movimientos válidos en la simulación
             valid_moves = [move for move in strategic_order if simulate_move(board, move) != board]
             
             if not valid_moves:
-                print("⚠️ No quedan movimientos válidos posibles. Reiniciando...")
+                print("⚠️ No quedan movimientos válidos. Reiniciando...")
                 restart_game(driver)
                 last_progress_time = time.time()
                 last_max_tile = 0
                 recent_boards.clear()
                 continue
             
-            # 6. ACTIVACIÓN DEL MOVIMIENTO ALEATORIO DE EMERGENCIA
-            # Si el tablero actual ya se ha repetido 3 veces en las últimas jugadas, hay ping-pong/bucle.
+            # 6. Activación del anti-bucle de vaivén
             if recent_boards.count(board_flat) >= 3 and len(valid_moves) > 1:
                 chosen_move = random.choice(valid_moves)
-                print(f"🔄 ¡Bucle detectado! Rompiendo estancamiento con movimiento aleatorio: {chosen_move}")
+                print(f"🔄 ¡Bucle detectado! Rompiendo ritmo con movimiento aleatorio: {chosen_move}")
                 recent_boards.clear()
             else:
-                # Selección estratégica normal adaptada a la esquina real
                 chosen_move = None
                 for move in strategic_order:
                     if move in valid_moves:
                         chosen_move = move
                         break
             
-            # 7. Ejecutar acción
+            # 7. Ejecutar tecla
             send_key(driver, chosen_move)
-            time.sleep(0.14)  # Retraso óptimo para la animación web
+            time.sleep(0.14)  
             
         except Exception as e:
             print(f"⚠️ Error: {e}. Reiniciando Selenium...")
