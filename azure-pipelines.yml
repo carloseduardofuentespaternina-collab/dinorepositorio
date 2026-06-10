@@ -19,5 +19,5 @@ steps:
 
 # 2. Ejecutar tu archivo específico controlador_dino.py en la pantalla real
 - script: |
-    python controlador_dino.py
-  displayName: 'Ejecutar controlador_dino.py en GUI Real'
+    python controlador_2048.py
+  displayName: 'Ejecutar controlador_2048.py en GUI Real'
