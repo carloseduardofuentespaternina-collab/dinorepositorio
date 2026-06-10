@@ -26,7 +26,6 @@ def get_board(driver):
             position_class = [c for c in classes if c.startswith("tile-position-")]
             value_class = [c for c in classes if c.startswith("tile-") and c[5:].isdigit()]
             if position_class and value_class:
-                # tile-position-col-row
                 parts = position_class[0].split("-")
                 col, row = int(parts[2]), int(parts[3])
                 value = int(value_class[0].split("-")[1])
@@ -35,17 +34,19 @@ def get_board(driver):
         pass
     return tiles
 
+def max_tile(driver):
+    """Retorna el valor máximo actual en el tablero."""
+    board = get_board(driver)
+    return max(board.values()) if board else 0
+
 try:
     print("Conectando al juego 2048...")
     driver.get("https://play2048.co/")
     time.sleep(3)
 
     body = driver.find_element(By.TAG_NAME, "body")
-    print("Juego iniciado")
+    print("Juego iniciado — Meta: llegar a 256\n")
 
-    # ─── Estrategia en esquina (esquina inferior-izquierda) ───
-    # Prioridad: LEFT → DOWN → RIGHT → UP
-    # Mantiene los tiles grandes en la esquina inferior-izquierda
     estrategia_esquina = [
         Keys.LEFT,
         Keys.DOWN,
@@ -53,32 +54,39 @@ try:
         Keys.UP,
     ]
 
-    ultimo_movimiento = 0  # índice que rota
+    ultimo_movimiento = 0
+    META = 256  # ✅ Cambia este valor si quieres otra meta
 
     for i in range(2000):
-        # Intentar movimiento prioritario según estrategia
         key = estrategia_esquina[ultimo_movimiento % len(estrategia_esquina)]
         body.send_keys(key)
         ultimo_movimiento += 1
 
         if i % 100 == 0:
-            print(f"Movimiento: {i}")
+            actual = max_tile(driver)
+            print(f"Movimiento: {i} | Tile máximo: {actual}")
 
         time.sleep(0.05)
+
+        # ✅ Detectar tile 256 (victoria personalizada)
+        actual = max_tile(driver)
+        if actual >= META:
+            print(f"\n🏆 ¡META ALCANZADA! Llegaste a {actual} en el movimiento {i}")
+            break
 
         # Detectar Game Over
         game_over = driver.find_elements(By.CLASS_NAME, "game-over")
         if game_over:
-            print("¡Juego terminado! (Game Over)")
+            print(f"\n💀 Game Over en movimiento {i} | Tile máximo: {actual}")
             break
 
-        # Detectar victoria (tile 2048)
+        # Detectar victoria oficial (2048)
         winner = driver.find_elements(By.CLASS_NAME, "game-won")
         if winner:
-            print("¡Ganaste! Llegaste a 2048 🎉")
+            print("¡Ganaste oficialmente! Llegaste a 2048 🎉")
             break
 
-    print("Prueba finalizada con éxito")
+    print("\nPrueba finalizada con éxito")
 
 except Exception as e:
     print(f"Error en la ejecución: {e}")
