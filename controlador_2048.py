@@ -13,44 +13,38 @@ from webdriver_manager.chrome import ChromeDriverManager
 GAME_URL = "https://raw.githubusercontent.com/gabrielecirulli/2048/master/index.html"
 
 def get_local_game_html():
-    """Descarga el HTML del juego desde GitHub (sin recursos externos molestos)."""
     try:
         response = requests.get(GAME_URL, timeout=10)
         response.raise_for_status()
         return response.text
     except Exception as e:
-        print(f"❌ Error descargando el juego: {e}")
-        # Fallback: usar un HTML mínimo incrustado (opcional)
+        print(f"❌ Error descargando: {e}")
         return None
 
 # =========================
-# CONFIGURACIÓN DE CHROME PARA AZURE
+# CONFIGURACIÓN CHROME
 # =========================
 chrome_options = Options()
-chrome_options.add_argument("--headless")  # Comenta si quieres ver la ventana
+chrome_options.add_argument("--headless")  # Quitar si quieres ver la ventana
 chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("--disable-web-security")  # Evita CORS en caso de recursos
-chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+chrome_options.add_argument("--disable-web-security")
 chrome_options.add_argument("--window-size=1024,768")
 
 # =========================
-# TABLERO (adaptado al DOM oficial de 2048)
+# TABLERO
 # =========================
 def empty_board():
     return [[0]*4 for _ in range(4)]
 
 def parse_tiles(driver):
-    """Versión compatible con el HTML original de 2048 (clases 'tile tile-pos-x-y')"""
     tiles = driver.find_elements(By.CSS_SELECTOR, ".tile")
     board = empty_board()
     for tile in tiles:
         try:
             value = int(tile.text)
-            # Extraer posición de las clases: tile-position-1-1, etc.
             classes = tile.get_attribute("class")
-            # Buscar clase tipo "tile-position-*-*"
             import re
             match = re.search(r"tile-position-(\d+)-(\d+)", classes)
             if match:
@@ -62,17 +56,44 @@ def parse_tiles(driver):
     return board
 
 # =========================
-# HEURÍSTICA Y MOVIMIENTOS (deterministas)
+# HEURÍSTICA AVANZADA
 # =========================
 def heuristic_score(board):
     empty_cells = sum(row.count(0) for row in board)
     max_tile = max(max(row) for row in board)
+    
+    # Suavidad (suma de diferencias entre vecinos)
     smoothness = 0
     for r in range(4):
         for c in range(3):
             smoothness += abs(board[r][c] - board[r][c+1])
-    return empty_cells * 1000 + max_tile * 10 - smoothness
+    for c in range(4):
+        for r in range(3):
+            smoothness += abs(board[r][c] - board[r+1][c])
+    
+    # Monotonicidad (prefiere filas/columnas ordenadas)
+    mono = 0
+    for r in range(4):
+        for c in range(3):
+            if board[r][c] >= board[r][c+1]:
+                mono += board[r][c] - board[r][c+1]
+            else:
+                mono -= board[r][c+1] - board[r][c]
+    for c in range(4):
+        for r in range(3):
+            if board[r][c] >= board[r+1][c]:
+                mono += board[r][c] - board[r+1][c]
+            else:
+                mono -= board[r+1][c] - board[r][c]
+    
+    # Peso por esquina (favorecer ficha grande en esquina superior izquierda)
+    corner_bonus = board[0][0] * 2
+    
+    return empty_cells * 800 + max_tile * 50 + corner_bonus + mono - smoothness
 
+# =========================
+# MOVIMIENTOS (SIMULACIÓN)
+# =========================
 def compress(row):
     new = [v for v in row if v != 0]
     new += [0] * (4 - len(new))
@@ -121,19 +142,27 @@ def simulate_move(board, direction):
         return move_board_right(board)
     return board
 
-def best_move(board):
+def best_move(board, previous_move=None):
     moves = ["UP", "DOWN", "LEFT", "RIGHT"]
     best_score = -1
-    best_move_chosen = "UP"
+    best_move_chosen = None
+    scores = []
     for move in moves:
         new_board = simulate_move(board, move)
+        # Si no cambia el tablero, puntuación muy baja
         if new_board == board:
-            continue
-        score = heuristic_score(new_board)
-        if score > best_score:
-            best_score = score
-            best_move_chosen = move
-    return best_move_chosen if best_score > -1 else random.choice(moves)
+            scores.append((move, -10000))
+        else:
+            score = heuristic_score(new_board)
+            scores.append((move, score))
+    # Ordenar por puntuación
+    scores.sort(key=lambda x: x[1], reverse=True)
+    # Si el mejor movimiento es el mismo que el anterior y hay alternativa, a veces cambiar
+    if previous_move and scores[0][0] == previous_move and len(scores) > 1:
+        # 30% de probabilidad de tomar el segundo mejor
+        if random.random() < 0.3:
+            return scores[1][0]
+    return scores[0][0]
 
 # =========================
 # ENVIAR TECLA
@@ -149,77 +178,85 @@ def send_move(driver, move):
     """)
 
 # =========================
-# REINICIO AUTOMÁTICO (para la versión local)
+# REINICIAR
 # =========================
 def restart_game(driver):
-    """Hace clic en el botón 'New Game' del juego original."""
     try:
-        new_game_btn = driver.find_element(By.CLASS_NAME, "restart-button")
-        new_game_btn.click()
+        btn = driver.find_element(By.CLASS_NAME, "restart-button")
+        btn.click()
         time.sleep(0.5)
-        print("🔄 Partida reiniciada")
+        print("🔄 Reiniciado")
         return True
     except:
-        print("⚠️ No se encontró botón New Game, recargando página...")
         driver.refresh()
         time.sleep(2)
         return False
 
 # =========================
-# BUCLE PRINCIPAL (NUNCA SE BLOQUEA)
+# BUCLE PRINCIPAL CON ANTI-ESTANCADO
 # =========================
 def main():
-    # 1. Descargar el juego offline
-    print("📥 Descargando juego 2048 sin publicidad...")
-    html_content = get_local_game_html()
-    if not html_content:
-        print("❌ No se pudo obtener el juego. Abortando.")
+    print("📥 Descargando juego...")
+    html = get_local_game_html()
+    if not html:
         return
-
-    # 2. Iniciar driver con opciones seguras para Azure
-    print("🚀 Iniciando navegador...")
+    
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-
-    # 3. Cargar el juego desde una data URI (totalmente local)
-    driver.get("data:text/html," + html_content.replace("#", "%23"))  # Escapar #
-    time.sleep(2)  # Esperar a que cargue el canvas
-
-    # Asegurar foco en el juego
+    driver.get("data:text/html," + html.replace("#", "%23"))
+    time.sleep(2)
     driver.find_element(By.TAG_NAME, "body").click()
-    print("✅ Juego cargado correctamente. Bot iniciado.")
-
+    print("✅ Juego cargado. Bot iniciado.")
+    
+    last_board = None
+    last_move = None
+    stuck_counter = 0
+    
     while True:
         try:
             board = parse_tiles(driver)
             if not board or all(v == 0 for row in board for v in row):
                 time.sleep(0.3)
                 continue
-
-            # Detectar Game Over (mensaje en el DOM)
-            game_over = driver.find_elements(By.CLASS_NAME, "game-over")
-            if game_over and game_over[0].is_displayed():
-                print("💀 Game Over detectado. Reiniciando...")
+            
+            # Verificar Game Over
+            if driver.find_elements(By.CLASS_NAME, "game-over") and driver.find_element(By.CLASS_NAME, "game-over").is_displayed():
+                print("💀 Game Over. Reiniciando...")
                 restart_game(driver)
                 time.sleep(1)
+                last_board = None
+                stuck_counter = 0
                 continue
-
-            # Movimiento inteligente
-            move = best_move(board)
+            
+            # Detectar estancamiento (tablero sin cambios después de varios movimientos)
+            if last_board is not None and board == last_board:
+                stuck_counter += 1
+            else:
+                stuck_counter = 0
+            
+            # Si está estancado, forzar un movimiento diferente (incluso si empeora)
+            if stuck_counter > 5:
+                print("⚠️ Estancado, forzando movimiento aleatorio...")
+                move = random.choice(["UP", "DOWN", "LEFT", "RIGHT"])
+                stuck_counter = 0
+            else:
+                move = best_move(board, last_move)
+            
             send_move(driver, move)
-            time.sleep(0.1)  # Pausa para animación
-
+            last_move = move
+            last_board = [row[:] for row in board]  # Copia profunda
+            
+            time.sleep(0.12)  # Ligeramente más rápido
+            
         except Exception as e:
-            print(f"⚠️ Error inesperado: {e}")
-            # Intento de recuperación: recargar el juego
+            print(f"⚠️ Error: {e}. Recuperando...")
             try:
                 driver.refresh()
                 time.sleep(2)
                 driver.find_element(By.TAG_NAME, "body").click()
             except:
-                print("❌ Error crítico, reiniciando driver...")
                 driver.quit()
                 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-                driver.get("data:text/html," + html_content)
+                driver.get("data:text/html," + html)
                 time.sleep(2)
                 driver.find_element(By.TAG_NAME, "body").click()
             time.sleep(1)
